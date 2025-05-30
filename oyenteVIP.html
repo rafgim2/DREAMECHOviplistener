@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>DreamEcho - Oyente</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.0.5/build/MidiWriter.min.js"></script>
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 1em;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 3em;
+      margin-bottom: 0.5em;
+    }
+
+    button {
+      margin: 0.5em;
+      font-size: 2em;
+      padding: 1em 2em;
+      cursor: pointer;
+    }
+
+    #status {
+      margin-bottom: 1em;
+      font-size: 1.2em;
+    }
+
+    #midiSelectContainer {
+      margin-top: 1em;
+    }
+
+    #grabacionControles {
+      margin-top: 2em;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5em;
+    }
+
+    #grabacionesSelect {
+      font-size: 1em;
+      padding: 0.5em;
+      margin: 0.5em;
+    }
+
+    button.grabando {
+      animation: parpadeo 1s infinite;
+      background-color: red;
+      color: white;
+    }
+
+    @keyframes parpadeo {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <h1>DreamEcho - Oyente</h1>
+  <p id="status">Esperando conexión…</p>
+
+  <button onclick="modoMIDI()">🎹 Usar mi piano digital</button>
+  <button onclick="modoVirtual()">🎧 Escuchar con sonido virtual</button>
+
+  <div id="midiSelectContainer"></div>
+
+  <div id="grabacionControles">
+    <button id="btnGrabar" onclick="iniciarGrabacion()">⏺️ Grabar</button>
+    <button onclick="detenerGrabacion()">⏹️ Detener</button>
+    <select id="grabacionesSelect">
+      <option value="">-- Elige una grabación --</option>
+    </select>
+    <button onclick="reproducirGrabacion()">▶️ Reproducir</button>
+    <button onclick="borrarGrabacion()">🗑️ Borrar</button>
+    <button onclick="renombrarGrabacion()">✏️ Renombrar</button>
+    <button onclick="descargarGrabacion()">💾 Descargar .mid</button>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const midiSelectContainer = document.getElementById("midiSelectContainer");
+    const grabacionesSelect = document.getElementById("grabacionesSelect");
+    const btnGrabar = document.getElementById("btnGrabar");
+
+    const ws = new WebSocket("wss://dreamecho.onrender.com");
+    let output = null;
+    let modo = null;
+    let synth = null;
+    let pedal = false;
+    let baseTime = null;
+    let queuePos = 0;
+    let queueLatency = 100;
+    const notasActivas = new Set();
+    const notasSostenidas = new Set();
+
+    let grabando = false;
+    let grabacionActual = [];
+    let grabaciones = [];
+
+    window.onload = () => {
+      const guardadas = localStorage.getItem("dreamEchoGrabaciones");
+      if (guardadas) {
+        grabaciones = JSON.parse(guardadas);
+        actualizarListaGrabaciones();
+      }
+    };
+
+    function guardarEnLocalStorage() {
+      localStorage.setItem("dreamEchoGrabaciones", JSON.stringify(grabaciones));
+    }
+
+    function actualizarListaGrabaciones() {
+      grabacionesSelect.innerHTML = `<option value="">-- Elige una grabación --</option>`;
+      grabaciones.forEach((g, i) => {
+        const option = document.createElement("option");
+        option.value = i;
+        option.text = g.nombre || `Grabación ${i + 1}`;
+        grabacionesSelect.appendChild(option);
+      });
+    }
+
+    function iniciarGrabacion() {
+      grabando = true;
+      grabacionActual = [];
+      baseTime = null;
+      statusEl.innerText = "Grabando… toca algo desde el piano.";
+      btnGrabar.classList.add("grabando");
+    }
+
+    function detenerGrabacion() {
+      grabando = false;
+      btnGrabar.classList.remove("grabando");
+      if (grabacionActual.length > 0) {
+        const nueva = {
+          nombre: `Grabación ${grabaciones.length + 1}`,
+          eventos: grabacionActual
+        };
+        grabaciones.push(nueva);
+        guardarEnLocalStorage();
+        actualizarListaGrabaciones();
+        statusEl.innerText = `${nueva.nombre} guardada.`;
+      } else {
+        statusEl.innerText = "Nada grabado.";
+      }
+    }
+
+    function reproducirGrabacion() {
+      const index = grabacionesSelect.value;
+      if (index === "") return;
+      const grabacion = grabaciones[index];
+      const eventos = grabacion.eventos;
+      for (let ev of eventos) {
+        const delay = Math.max(0, ev.time - eventos[0].time);
+        setTimeout(() => {
+          ws.dispatchEvent(new MessageEvent("message", {
+            data: JSON.stringify({ type: "midi", data: ev.data, time: 0 })
+          }));
+        }, delay);
+      }
+      statusEl.innerText = `Reproduciendo: ${grabacion.nombre}`;
+    }
+
+    function borrarGrabacion() {
+      const index = grabacionesSelect.value;
+      if (index === "") return;
+      const nombre = grabaciones[index].nombre;
+      if (!confirm(`¿Borrar "${nombre}"? Esta acción no se puede deshacer.`)) return;
+      grabaciones.splice(index, 1);
+      guardarEnLocalStorage();
+      actualizarListaGrabaciones();
+      statusEl.innerText = `"${nombre}" borrada.`;
+    }
+
+    function renombrarGrabacion() {
+      const index = grabacionesSelect.value;
+      if (index === "") return;
+      const nuevoNombre = prompt("Nuevo nombre:", grabaciones[index].nombre);
+      if (nuevoNombre) {
+        grabaciones[index].nombre = nuevoNombre;
+        guardarEnLocalStorage();
+        actualizarListaGrabaciones();
+        statusEl.innerText = `Grabación renombrada a "${nuevoNombre}".`;
+      }
+    }
+
+    function descargarGrabacion() {
+      const index = grabacionesSelect.value;
+      if (index === "") return;
+
+      const grabacion = grabaciones[index];
+      const eventos = grabacion.eventos;
+      if (!eventos.length) return;
+
+      const track = new MidiWriter.Track();
+      track.setTempo(90);
+      track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
+
+      let startTime = eventos[0].time;
+      eventos.forEach(ev => {
+        const [status, note, velocity] = ev.data;
+        const delta = Math.round((ev.time - startTime) / 10); // ticks ~ ms/10
+        if ((status & 0xf0) === 0x90 && velocity > 0) {
+          track.addEvent(new MidiWriter.NoteEvent({
+            pitch: [MidiWriter.Utils.midiNumberToNoteName(note)],
+            duration: 'T' + 120, // duración fija
+            startTick: delta,
+            velocity: velocity / 127
+          }));
+        }
+      });
+
+      const write = new MidiWriter.Writer(track);
+      const blob = new Blob([write.buildFile()], { type: 'audio/midi' });
+      const url = URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = grabacion.nombre.replace(/\s+/g, "_") + ".mid";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      statusEl.innerText = `Descargando ${grabacion.nombre}.mid`;
+    }
+
+    ws.onopen = () => {
+      statusEl.textContent = "Conectado al servidor, esperando tu elección…";
+    };
+
+    ws.onmessage = async (event) => {
+      const text = typeof event.data === 'string'
+        ? event.data
+        : await event.data.text();
+      const message = JSON.parse(text);
+
+      if (message.type === "stats") {
+        queuePos = message.clients;
+        queueLatency = 50 + 5 * Math.sqrt(queuePos);
+        statusEl.textContent =
+          `Posición en cola: ${queuePos} → latencia = ${Math.round(queueLatency)} ms`;
+        return;
+      }
+
+      if (message.type === "midi") {
+        const [status, note, velocity] = message.data;
+        const command = status & 0xf0;
+        const eventTime = message.time;
+
+        if (!baseTime) baseTime = performance.now() - eventTime;
+
+        const extra = (modo === 'virtual') ? queueLatency : 0;
+        const delay = Math.max(0, eventTime + baseTime - performance.now() + extra);
+        const toneTime = "+" + (delay / 1000);
+
+        if (grabando) {
+          grabacionActual.push({
+            data: message.data,
+            time: performance.now()
+          });
+        }
+
+        if (modo === "midi" && output) {
+          return setTimeout(() =>
+            output.send(new Uint8Array(message.data)), delay
+          );
+        }
+
+        if (modo === "virtual" && synth) {
+          const freq = Tone.Frequency(note, "midi").toFrequency();
+
+          if (command === 0x90 && velocity > 0) {
+            if (!notasActivas.has(freq)) {
+              Tone.Draw.schedule(() => {
+                synth.triggerAttack(freq, undefined, velocity / 127);
+              }, toneTime);
+            }
+            notasActivas.add(freq);
+            notasSostenidas.delete(freq);
+
+          } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
+            if (pedal) {
+              notasActivas.delete(freq);
+              notasSostenidas.add(freq);
+            } else {
+              Tone.Draw.schedule(() => {
+                synth.triggerRelease(freq, "+0.2");
+              }, toneTime);
+              notasActivas.delete(freq);
+              notasSostenidas.delete(freq);
+            }
+
+          } else if (status === 176 && note === 64) {
+            if (velocity >= 64) {
+              pedal = true;
+            } else {
+              pedal = false;
+              Tone.Draw.schedule(() => {
+                for (let f of [...notasSostenidas]) {
+                  if (!notasActivas.has(f)) {
+                    synth.triggerRelease(f, "+0.2");
+                    notasSostenidas.delete(f);
+                  }
+                }
+              }, toneTime);
+            }
+          }
+        }
+      }
+    };
+
+    function modoMIDI() {
+      modo = "midi";
+      statusEl.innerText = "Buscando dispositivos MIDI de salida…";
+
+      navigator.requestMIDIAccess().then((midiAccess) => {
+        const outputs = Array.from(midiAccess.outputs.values());
+        if (outputs.length > 0) {
+          midiSelectContainer.innerHTML = "";
+          const select = document.createElement("select");
+          select.id = "midiOutSelect";
+          const defaultOption = document.createElement("option");
+          defaultOption.text = "-- Elige dispositivo MIDI --";
+          defaultOption.value = "";
+          select.appendChild(defaultOption);
+
+          outputs.forEach((out, idx) => {
+            const option = document.createElement("option");
+            option.value = out.id;
+            option.text = out.name || `MIDI Dispositivo ${idx + 1}`;
+            select.appendChild(option);
+          });
+
+          select.addEventListener("change", (e) => {
+            const chosenId = e.target.value;
+            const chosen = outputs.find(o => o.id === chosenId);
+            if (chosen) {
+              output = chosen;
+              statusEl.innerText = `Salida MIDI seleccionada: ${chosen.name}`;
+            } else {
+              statusEl.innerText = "No se ha seleccionado salida MIDI.";
+              output = null;
+            }
+          });
+
+          midiSelectContainer.appendChild(select);
+          statusEl.innerText = "Selecciona un dispositivo MIDI para usarlo.";
+        } else {
+          statusEl.innerText = "No se han encontrado salidas MIDI.";
+        }
+      }).catch(() => {
+        statusEl.innerText = "No se ha podido acceder a WebMIDI.";
+      });
+    }
+
+    async function modoVirtual() {
+      modo = "virtual";
+      statusEl.innerText = "Cargando piano virtual…";
+      await Tone.start();
+      synth = new Tone.Sampler({
+        urls: {
+          A0: "A0.mp3", C1: "C1.mp3", "D#1": "Ds1.mp3", "F#1": "Fs1.mp3",
+          A1: "A1.mp3", C2: "C2.mp3", "D#2": "Ds2.mp3", "F#2": "Fs2.mp3",
+          A2: "A2.mp3", C3: "C3.mp3", "D#3": "Ds3.mp3", "F#3": "Fs3.mp3",
+          A3: "A3.mp3", C4: "C4.mp3", "D#4": "Ds4.mp3", "F#4": "Fs4.mp3",
+          A4: "A4.mp3", C5: "C5.mp3", "D#5": "Ds5.mp3", "F#5": "Fs5.mp3",
+          A5: "A5.mp3", C6: "C6.mp3", "D#6": "Ds6.mp3", "F#6": "Fs6.mp3",
+          A6: "A6.mp3", C7: "C7.mp3", "D#7": "Ds7.mp3", "F#7": "Fs7.mp3",
+          A7: "A7.mp3", C8: "C8.mp3"
+        },
+        baseUrl: "https://tonejs.github.io/audio/salamander/",
+        release: 0.4,
+        onload: () => {
+          statusEl.innerText = `Modo virtual listo. Posición en cola: ${queuePos} (latencia ≃ ${Math.round(queueLatency)} ms)`;
+        }
+      }).toDestination();
+    }
+  </script>
+</body>
+</html>
