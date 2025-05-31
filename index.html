@@ -288,7 +288,7 @@
     }
 
     // ======================
-    // DESCARGA DEL .mid VÁLIDO (Formato 0)
+    // DESCARGA DEL .mid VÁLIDO (Formato 0, canal 1)
     // ======================
     function descargarGrabacionComoMID() {
       console.log("[descarga] Botón pulsado.");
@@ -332,13 +332,13 @@
         metronome: 24,
         thirtyseconds: 8
       }));
-      // 1.c) Program Change: Piano clásico (instrumento 1) en canal 0
+      // 1.c) Program Change: Piano clásico (instrumento 1) en canal 1
       track.addEvent(new MidiWriter.ProgramChangeEvent({
         instrument: 1,
-        channel: 0
+        channel: 1
       }));
 
-      // 2) Convertir eventos en NoteEvent en el mismo track
+      // 2) Convertir eventos en NoteEvent en el mismo track (canal 1)
       const startTime = eventos[0].time;
       eventos.forEach(ev => {
         const [st, note, vel] = ev.data;
@@ -352,7 +352,7 @@
             duration: 'T128',   // 1 negra exacta (128 ticks)
             startTick: deltaTicks,
             velocity: vel / 127,
-            channel: 0
+            channel: 1
           }));
         }
       });
