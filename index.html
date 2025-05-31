@@ -288,7 +288,7 @@
     }
 
     // ======================
-    // DESCARGA DEL .mid VÁLIDO (Formato 1, 2 pistas)
+    // DESCARGA DEL .mid VÁLIDO (Formato 0)
     // ======================
     function descargarGrabacionComoMID() {
       console.log("[descarga] Botón pulsado.");
@@ -320,24 +320,25 @@
         return;
       }
 
-      // 1) Crear Pista 0: Metadatos (Tempo, Time Signature)
-      const track0 = new MidiWriter.Track();
-      track0.setTempo(90);
-      track0.addEvent(new MidiWriter.TimeSignatureEvent({
+      // 1) Crear un único track (Formato 0) con metadatos + notas
+      const track = new MidiWriter.Track();
+
+      // 1.a) Tempo 90 BPM (Meta Set Tempo)
+      track.setTempo(90);
+      // 1.b) Time Signature 4/4 (Meta Time Signature)
+      track.addEvent(new MidiWriter.TimeSignatureEvent({
         numerator: 4,
         denominator: 4,
         metronome: 24,
         thirtyseconds: 8
       }));
-
-      // 2) Crear Pista 1: Program Change + NoteEvents
-      const track1 = new MidiWriter.Track();
-      track1.addEvent(new MidiWriter.ProgramChangeEvent({
+      // 1.c) Program Change: Piano clásico (instrumento 1) en canal 0
+      track.addEvent(new MidiWriter.ProgramChangeEvent({
         instrument: 1,
         channel: 0
       }));
 
-      // 3) Convertir eventos en NoteEvent en track1
+      // 2) Convertir eventos en NoteEvent en el mismo track
       const startTime = eventos[0].time;
       eventos.forEach(ev => {
         const [st, note, vel] = ev.data;
@@ -346,7 +347,7 @@
         if (command === 0x90 && vel > 0) {
           const deltaMs = ev.time - startTime;
           const deltaTicks = Math.round(deltaMs / 10);
-          track1.addEvent(new MidiWriter.NoteEvent({
+          track.addEvent(new MidiWriter.NoteEvent({
             pitch: [ midiNumberToNoteName(note) ],
             duration: 'T128',   // 1 negra exacta (128 ticks)
             startTick: deltaTicks,
@@ -356,15 +357,15 @@
         }
       });
 
-      // 4) Generar Writer con ambas pistas (formato 1)
-      const writer = new MidiWriter.Writer([track0, track1]);
+      // 3) Generar Writer en Formato 0 (single track)
+      const writer = new MidiWriter.Writer(track);
       const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
       const url = URL.createObjectURL(blob);
 
-      // 5) Limpiar contenedor de enlace anterior
+      // 4) Limpiar contenedor de enlace anterior
       descargaLinkDiv.innerHTML = "";
 
-      // 6) Crear un <a> visible (por si el clic automático falla)
+      // 5) Crear un <a> visible (por si el clic automático falla)
       const aVisible = document.createElement("a");
       const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`)
         .replace(/\s+/g, "_") + ".mid";
@@ -373,14 +374,14 @@
       aVisible.textContent = "Si no descarga automáticamente, haz clic aquí";
       descargaLinkDiv.appendChild(aVisible);
 
-      // 7) Intentar disparar la descarga automáticamente
+      // 6) Intentar disparar la descarga automáticamente
       setTimeout(() => {
         aVisible.click();
         console.log(`[descarga] Intento de clic automático para "${nombreArchivo}".`);
         statusEl.innerText = `Descargando ${nombreArchivo}`;
       }, 100);
 
-      // 8) Revocar la URL pasado un rato para liberar memoria
+      // 7) Revocar la URL pasado un rato para liberar memoria
       setTimeout(() => {
         URL.revokeObjectURL(url);
         console.log(`[descarga] URL revocada para "${nombreArchivo}".`);
