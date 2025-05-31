@@ -12,6 +12,7 @@
       font-family: sans-serif;
       padding: 1em;
       text-align: center;
+      overflow: hidden; /* Para evitar barras de scroll si el ripple se sale */
     }
     h1 {
       font-size: 3em;
@@ -108,6 +109,26 @@
     .mensaje-propio {
       color: blue;
     }
+
+    /* ======================== */
+    /* ESTILOS PARA EL EFECTO RIPPLE */
+    /* ======================== */
+    .ripple {
+      position: absolute;
+      border-radius: 50%;
+      background: rgba(0, 123, 255, 0.3);
+      transform: scale(0);
+      animation: ripple-effect 0.6s ease-out;
+      pointer-events: none;
+      /* Para que el elemento esté por encima de todo */
+      z-index: 9999;
+    }
+    @keyframes ripple-effect {
+      to {
+        transform: scale(4);
+        opacity: 0;
+      }
+    }
   </style>
 </head>
 <body>
@@ -155,6 +176,31 @@
       const octave = Math.floor(number / 12) - 1;
       const noteIndex = number % 12;
       return names[noteIndex] + octave;
+    }
+
+    // ======================
+    // CREAR “RIPPLE” EN POSICIÓN ALEATORIA
+    // ======================
+    function createRipple() {
+      // Crear el elemento
+      const ripple = document.createElement("div");
+      ripple.classList.add("ripple");
+      // Tamaño del círculo para cubrir la pantalla al expandirse
+      const size = Math.max(window.innerWidth, window.innerHeight);
+      ripple.style.width = ripple.style.height = size + "px";
+
+      // Posición aleatoria (centro del ripple)
+      const x = Math.random() * window.innerWidth - size / 2;
+      const y = Math.random() * window.innerHeight - size / 2;
+      ripple.style.left = x + "px";
+      ripple.style.top = y + "px";
+
+      // Añadir al body
+      document.body.appendChild(ripple);
+      // Eliminar tras terminar la animación
+      ripple.addEventListener("animationend", () => {
+        ripple.remove();
+      });
     }
 
     // ======================
@@ -365,6 +411,11 @@
       }
 
       if (msg.type === "midi") {
+        // ================================
+        // AÑADIR RIPPLE ALEATORIO AQUÍ:
+        // ================================
+        createRipple();
+
         const [st, note, velocity] = msg.data;
         const command = st & 0xf0;
         const eventTime = msg.time;
