@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>DreamEcho - Oyente VIP (iOS Web MIDI Shim)</title>
+  <title>DreamEcho - Oyente VIP (iOS Web MIDI Shim Mejorado)</title>
 
   <!-- 1) Cargar el shim de Web MIDI API -->
   <script src="https://cdn.jsdelivr.net/npm/webmidiapishim"></script>
@@ -201,14 +201,14 @@
     }
 
     // ======================
-    // PETICIÓN WEB MIDI (punto 3 con shim)
+    // PETICIÓN WEB MIDI (punto 3 con shim + estado)
     // ======================
     document.addEventListener("DOMContentLoaded", () => {
       // Dejamos un breve retraso para que el shim se "enganche"
       setTimeout(() => {
         if (typeof navigator.requestMIDIAccess !== "function") {
           statusEl.textContent = "navigator.requestMIDIAccess NO existe. " +
-            "Asegúrate de abrir esta página desde Web MIDI Browser y que sea HTTPS.";
+            "Abre esta página en Web MIDI Browser y usa HTTPS.";
           return;
         }
 
@@ -221,14 +221,31 @@
           const inputs = Array.from(midiAccess.inputs.values());
           const outputs = Array.from(midiAccess.outputs.values());
 
-          if (inputs.length === 0 && outputs.length === 0) {
-            statusEl.textContent = "WebMIDI activo, ¡pero no hay puertos MIDI detectados!";
-            return;
+          // Función para actualizar el estado de puertos en pantalla
+          function actualizarPuertos() {
+            const inCount = Array.from(midiAccess.inputs.values()).length;
+            const outCount = Array.from(midiAccess.outputs.values()).length;
+            if (inCount + outCount === 0) {
+              statusEl.textContent = "WebMIDI activo, ¡pero no hay puertos MIDI detectados!";
+            } else {
+              statusEl.textContent = `WebMIDI OK: ${inCount} entrada(s), ${outCount} salida(s) detectada(s).`;
+            }
           }
 
-          statusEl.textContent = `WebMIDI OK: ${inputs.length} entrada(s), ${outputs.length} salida(s) detectada(s).`;
+          // Llamar una vez inicialmente
+          actualizarPuertos();
 
-          // Llenar un <select> para elegir salida MIDI (opcional)
+          // Escuchar cambios de dispositivo (conexiones/desconexiones)
+          midiAccess.onstatechange = (event) => {
+            console.log("Estado cambiar:", event.port.type, event.port.name, event.port.state);
+            actualizarPuertos();
+            // Si aparece una nueva salida, la agregamos al <select> o habilitamos el botón
+            if (event.port.type === "output" && event.port.state === "connected") {
+              agregarSalidaAlSelect(event.port);
+            }
+          };
+
+          // Crear un <select> para elegir salida MIDI (si no existe)
           const sel = document.createElement("select");
           sel.id = "midiOutSelect";
           const dopt = document.createElement("option");
@@ -244,7 +261,8 @@
           });
 
           sel.addEventListener("change", e => {
-            const chosen = outputs.find(o => o.id === e.target.value);
+            const chosen = Array.from(midiAccess.outputs.values())
+                                 .find(o => o.id === e.target.value);
             if (chosen) {
               output = chosen;
               statusEl.textContent = `Salida MIDI seleccionada: ${chosen.name}`;
@@ -256,8 +274,23 @@
 
           midiSelectContainer.appendChild(sel);
 
-          // Habilitar el botón de modoMIDI ahora que ya hay salidas
-          modoMIDIBtn.disabled = false;
+          // Función auxiliar para agregar una salida nueva al <select>
+          function agregarSalidaAlSelect(port) {
+            // Verificamos si ya está en el select
+            if (![...sel.options].some(opt => opt.value === port.id)) {
+              const opt = document.createElement("option");
+              opt.value = port.id;
+              opt.text = port.name;
+              sel.appendChild(opt);
+            }
+          }
+
+          // Habilitar el botón "Usar mi piano digital" solo si hay al menos una salida
+          if (outputs.length > 0) {
+            modoMIDIBtn.disabled = false;
+          } else {
+            modoMIDIBtn.textContent = "🎹 (Sin salida MIDI)";
+          }
         }
 
         function onMIDIFailure(err) {
@@ -482,7 +515,6 @@
       modo = "midi";
       statusEl.innerText = "Modo MIDI: selecciona tu dispositivo…";
       // El <select> ya fue creado en onMIDISuccess
-      // (no hay que volver a pedir acceso)
     }
 
     async function modoVirtual() {
