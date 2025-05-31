@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <title>DreamEcho - Oyente VIP</title>
 
-  <!-- 1) Tone.js (para reproducción virtual) -->
+  <!-- 1) Tone.js (para síntesis virtual si usas modo “virtual”) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.min.js"></script>
 
-  <!-- 2) MidiWriter.js: debe cargarse ANTES de que empiece nuestro código -->
+  <!-- 2) MidiWriter.js (Browser build 3.1.1) -->
   <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@3.1.1/browser/midiwriter.min.js"></script>
 
   <style>
@@ -89,7 +89,7 @@
     .mensaje-propio {
       color: blue;
     }
-    /* Contenedor para el enlace de descarga */
+    /* Contenedor para el enlace de descarga manual */
     #descargaLink {
       margin-top: 1em;
       font-size: 1em;
@@ -110,7 +110,7 @@
 
   <div id="midiSelectContainer"></div>
 
-  <!-- Chat justo después de elegir modo -->
+  <!-- Chat -->
   <div id="chatControles">
     <div id="chatLog"></div>
     <input id="chatInput" placeholder="Escribe tu mensaje…" />
@@ -127,33 +127,45 @@
     <button onclick="reproducirGrabacion()">▶️ Reproducir</button>
     <button onclick="borrarGrabacion()">🗑️ Borrar</button>
     <button onclick="renombrarGrabacion()">✏️ Renombrar</button>
-    <!-- Este es el botón que genera y descarga el .mid vía MidiWriter.js -->
+    <!-- Botón que genera y descarga el .mid usando MidiWriter.js -->
     <button onclick="descargarGrabacionComoMID()">💾 Descargar .mid</button>
-    <!-- En caso de que el clic automático falle, mostramos aquí un enlace manual -->
+    <!-- Si el clic automático falla, aparecerá este enlace -->
     <div id="descargaLink"></div>
   </div>
 
-  <!-- CODIGO PRINCIPAL (debe ir después de cargar Tone.js y MidiWriter.js) -->
   <script>
-    // Elementos del DOM
-    const statusEl          = document.getElementById("status");
-    const oyentesEl         = document.getElementById("recuentoOyentes");
+    // ======================
+    // FUNCIONES AUXILIARES
+    // ======================
+
+    // Convierte un número MIDI (0–127) en nombre de nota (p.ej. 60 → "C4").
+    function midiNumberToNoteName(number) {
+      const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+      const octave = Math.floor(number / 12) - 1;
+      const noteIndex = number % 12;
+      return names[noteIndex] + octave;
+    }
+
+    // ======================
+    // ACCESO AL DOM
+    // ======================
+    const statusEl        = document.getElementById("status");
+    const oyentesEl       = document.getElementById("recuentoOyentes");
     const midiSelectContainer = document.getElementById("midiSelectContainer");
     const grabacionesSelect   = document.getElementById("grabacionesSelect");
-    const btnGrabar         = document.getElementById("btnGrabar");
-    const chatLog           = document.getElementById("chatLog");
-    const chatInput         = document.getElementById("chatInput");
-    const sendChatBtn       = document.getElementById("sendChatBtn");
-    const descargaLinkDiv   = document.getElementById("descargaLink");
+    const btnGrabar       = document.getElementById("btnGrabar");
+    const chatLog         = document.getElementById("chatLog");
+    const chatInput       = document.getElementById("chatInput");
+    const sendChatBtn     = document.getElementById("sendChatBtn");
+    const descargaLinkDiv = document.getElementById("descargaLink");
 
-    // WebSocket
-    const ws = new WebSocket("wss://dreamecho.onrender.com");
-
-    // Variables de MIDI y grabación
+    // ======================
+    // VARIABLES DE ESTADO
+    // ======================
     let output = null, modo = null, synth = null, pedal = false;
     let baseTime = null, queuePos = 0, queueLatency = 100;
-    const notasActivas     = new Set();
-    const notasSostenidas  = new Set();
+    const notasActivas    = new Set();
+    const notasSostenidas = new Set();
     let grabando = false;
     let grabacionActual = [];
     let grabaciones = [];
@@ -162,7 +174,14 @@
     // Nombre de usuario para el chat
     const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
 
-    // Al cargar la página, recuperamos las grabaciones de localStorage si existen
+    // ======================
+    // WEB SOCKET
+    // ======================
+    const ws = new WebSocket("wss://dreamecho.onrender.com");
+
+    // ======================
+    // CARGA INICIAL DE GRABACIONES
+    // ======================
     window.onload = () => {
       const guardadas = localStorage.getItem("dreamEchoGrabaciones");
       if (guardadas) {
@@ -185,13 +204,16 @@
       });
     }
 
+    // ======================
+    // FUNCIONES DE GRABACIÓN
+    // ======================
     function iniciarGrabacion() {
       grabando = true;
       grabacionActual = [];
       baseTime = null;
       statusEl.innerText = "Grabando… toca algo desde el piano.";
       btnGrabar.classList.add("grabando");
-      descargaLinkDiv.innerHTML = "";
+      descargaLinkDiv.innerHTML = "";  // Limpiar enlace viejo (por si existe)
       console.log("[grabación] Iniciada. grabacionActual vacía.");
     }
 
@@ -217,7 +239,6 @@
     function reproducirGrabacion() {
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") return;
-
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
 
@@ -237,7 +258,6 @@
     function borrarGrabacion() {
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") return;
-
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
 
@@ -254,7 +274,6 @@
     function renombrarGrabacion() {
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") return;
-
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
 
@@ -268,7 +287,9 @@
       }
     }
 
-    // ==== FUNCIÓN PARA GENERAR y DESCARGAR EL .mid REAL ====
+    // ======================
+    // DESCARGA DEL .mid VÁLIDO
+    // ======================
     function descargarGrabacionComoMID() {
       console.log("[descarga] Botón pulsado.");
 
@@ -292,39 +313,39 @@
         return;
       }
 
-      // Verificamos que MidiWriter esté definido
+      // Verificar que MidiWriter está disponible
       if (typeof MidiWriter === "undefined") {
-        console.error("[descarga] MidiWriter no está definido. ¿Fallo en la carga del script?");
-        statusEl.innerText = "Error: no se ha cargado MidiWriter.";
+        console.error("[descarga] MidiWriter no está definido. Comprueba que se cargó correctamente.");
+        statusEl.innerText = "Error: no se ha cargado MidiWriter.js";
         return;
       }
 
-      // 1) Crear track MIDI a 90 BPM y asignar instrumento (piano=1)
+      // 1) Crear un track MIDI a 90 BPM y asignar instrumento (piano = 1)
       const track = new MidiWriter.Track();
       track.setTempo(90);
       track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
 
-      // 2) Tomar timestamp del primer evento como referencia de tiempo
+      // 2) Tomar como referencia el timestamp del primer evento
       const startTime = eventos[0].time;
 
-      // 3) Convertir cada evento MIDI guardado a un NoteEvent del track
+      // 3) Convertir cada evento guardado en NoteEvent
       eventos.forEach(ev => {
         const [st, note, vel] = ev.data;
         const command = st & 0xf0;
-        // Solo añadimos las notas ON (0x90 con velocity > 0)
+        // Solo notas ON (0x90 con velocity > 0)
         if (command === 0x90 && vel > 0) {
           const deltaMs = ev.time - startTime;
           const deltaTicks = Math.round(deltaMs / 10);
           track.addEvent(new MidiWriter.NoteEvent({
-            pitch: [MidiWriter.Utils.midiNumberToNoteName(note)],
-            duration: 'T120',      // Puedes ajustar duración si hace falta
+            pitch: [ midiNumberToNoteName(note) ],
+            duration: 'T120',   // Duración fija; puedes ajustar si quieres
             startTick: deltaTicks,
             velocity: vel / 127
           }));
         }
       });
 
-      // 4) Generar el .mid y crear un Blob
+      // 4) Generar el array de bytes del .mid y crear un Blob
       const writer = new MidiWriter.Writer(track);
       const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
       const url = URL.createObjectURL(blob);
@@ -332,7 +353,7 @@
       // 5) Limpiar contenedor de enlace anterior
       descargaLinkDiv.innerHTML = "";
 
-      // 6) Crear enlace visible (en caso de que el clic automático sea bloqueado)
+      // 6) Crear un <a> visible (por si el clic automático falla)
       const aVisible = document.createElement("a");
       const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`)
         .replace(/\s+/g, "_") + ".mid";
@@ -348,14 +369,16 @@
         statusEl.innerText = `Descargando ${nombreArchivo}`;
       }, 100);
 
-      // 8) Revocar URL tras un tiempo para liberar memoria
+      // 8) Revocar la URL pasado un rato para liberar memoria
       setTimeout(() => {
         URL.revokeObjectURL(url);
         console.log(`[descarga] URL revocada para "${nombreArchivo}".`);
       }, 30000);
     }
 
-    // ==== Resto del código (chat, WebSocket, modo MIDI/Virtual) ====
+    // ======================
+    // CHAT Y MIDI ENTRANTES
+    // ======================
     function appendChat(user, text) {
       const msg = document.createElement("div");
       const time = new Date().toLocaleTimeString();
@@ -410,7 +433,7 @@
         const eventTime = msg.time;
         if (!baseTime) baseTime = performance.now() - eventTime;
 
-        // ←←← AÑADIDO PARA GRABAR CADA EVENTO MIDI ←←←
+        // ←←← GRABAR CADA EVENTO MIDI QUE LLEGA ←←←
         if (grabando) {
           grabacionActual.push({
             data: msg.data,
@@ -418,10 +441,11 @@
           });
           console.log(`[grabación] Evento push: data=${msg.data}, time=${eventTime}`);
         }
-        // ←←← FIN DE LA ADICIÓN PARA GRABAR ←←←
+        // ←←← FIN DE GRABAR ←←←
 
         const extra = modo === "virtual" ? queueLatency : 0;
-        const delay = Math.max(0,
+        const delay = Math.max(
+          0,
           eventTime + baseTime - performance.now() + extra
         );
         const toneTime = "+" + (delay / 1000);
@@ -462,6 +486,9 @@
       }
     };
 
+    // ======================
+    // MODO MIDI Y VIRTUAL
+    // ======================
     function modoMIDI() {
       modo = "midi";
       statusEl.innerText = "Buscando dispositivos MIDI de salida…";
