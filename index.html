@@ -80,9 +80,8 @@
       cursor: pointer;
       margin-left: 0.5em;
     }
-
-    /* Clase para colorear en azul los mensajes propios */
-    .chat-mensaje-propio {
+    /* Clase para destacar el mensaje del oyente actual */
+    .mensaje-propio {
       color: blue;
     }
   </style>
@@ -119,14 +118,14 @@
 
   <script>
     // Elementos
-    const statusEl            = document.getElementById("status");
-    const oyentesEl           = document.getElementById("recuentoOyentes");
+    const statusEl      = document.getElementById("status");
+    const oyentesEl     = document.getElementById("recuentoOyentes");
     const midiSelectContainer = document.getElementById("midiSelectContainer");
     const grabacionesSelect   = document.getElementById("grabacionesSelect");
-    const btnGrabar           = document.getElementById("btnGrabar");
-    const chatLog             = document.getElementById("chatLog");
-    const chatInput           = document.getElementById("chatInput");
-    const sendChatBtn         = document.getElementById("sendChatBtn");
+    const btnGrabar     = document.getElementById("btnGrabar");
+    const chatLog       = document.getElementById("chatLog");
+    const chatInput     = document.getElementById("chatInput");
+    const sendChatBtn   = document.getElementById("sendChatBtn");
 
     // WebSocket
     const ws = new WebSocket("wss://dreamecho.onrender.com");
@@ -259,23 +258,19 @@
       statusEl.innerText = `Descargando ${grabaciones[idx].nombre}.mid`;
     }
 
-    // ------------------------------
-    // Modificación aquí: appendChat
     function appendChat(user, text) {
       const msg = document.createElement("div");
       const time = new Date().toLocaleTimeString();
-      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text>`;
 
-      // Si el autor coincide con nuestro username, aplicamos la clase para 
-      // colorear el mensaje en azul
+      // Si el autor coincide con el oyente actual, le aplicamos la clase "mensaje-propio"
       if (user === username) {
-        msg.classList.add("chat-mensaje-propio");
+        msg.classList.add("mensaje-propio");
       }
 
+      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text}`;
       chatLog.appendChild(msg);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
-    // ------------------------------
 
     function sendChat() {
       const text = chatInput.value.trim();
@@ -337,12 +332,6 @@
             synth.triggerAttack(freq, undefined, velocity / 127);
             notasActivas.add(freq);
             notasSostenidas.delete(freq);
-            // Si estamos grabando, almacenamos el evento
-            if (grabando) {
-              const now = performance.now();
-              const tiempoRelativo = baseTime === null ? 0 : now - baseTime;
-              grabacionActual.push({ time: tiempoRelativo, data: msg.data });
-            }
           } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
             if (pedal) {
               notasActivas.delete(freq);
