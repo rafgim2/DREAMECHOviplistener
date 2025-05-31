@@ -2,10 +2,12 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8" />
-  <title>DreamEcho - Oyente VIP</title>
+  <title>DreamEcho - Oyente VIP (iOS Web MIDI Shim)</title>
 
-  <!-- 1) Tone.js (para síntesis virtual si usas modo “virtual”) -->
+  <!-- 1) Cargar el shim de Web MIDI API -->
   <script src="https://cdn.jsdelivr.net/npm/webmidiapishim"></script>
+
+  <!-- 2) Tone.js (para síntesis virtual si usas modo “virtual”) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.min.js"></script>
 
   <style>
@@ -23,15 +25,16 @@
       margin-bottom: 0.5em;
       color: #555;
     }
+    #status {
+      margin-bottom: 1em;
+      font-size: 1.2em;
+      color: #333;
+    }
     button {
       margin: 0.5em;
       font-size: 2em;
       padding: 1em 2em;
       cursor: pointer;
-    }
-    #status {
-      margin-bottom: 1em;
-      font-size: 1.2em;
     }
     #midiSelectContainer {
       margin-top: 1em;
@@ -58,7 +61,6 @@
       50% { opacity: 0.3; }
       100% { opacity: 1; }
     }
-    /* Parpadeo verde para reproducción */
     button.reproduciendo {
       animation: parpadeoVerde 1s infinite;
       background-color: green;
@@ -94,7 +96,6 @@
       cursor: pointer;
       margin-left: 0.5em;
     }
-    /* Clase para destacar el mensaje del oyente actual */
     .mensaje-propio {
       color: blue;
     }
@@ -103,9 +104,9 @@
 <body>
   <h1>DreamEcho - Oyente VIP</h1>
   <p id="recuentoOyentes">Oyentes conectados: --</p>
-  <p id="status">Esperando conexión…</p>
+  <p id="status">Inicializando Web MIDI…</p>
 
-  <button onclick="modoMIDI()">🎹 Usar mi piano digital</button>
+  <button onclick="modoMIDI()" disabled>🎹 Usar mi piano digital</button>
   <button onclick="modoVirtual()">🎧 Escuchar con sonido virtual</button>
 
   <div id="midiSelectContainer"></div>
@@ -133,8 +134,6 @@
     // ======================
     // FUNCIONES AUXILIARES
     // ======================
-
-    // Convierte un número MIDI (0–127) en nombre de nota (p.ej. 60 → "C4").
     function midiNumberToNoteName(number) {
       const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
       const octave = Math.floor(number / 12) - 1;
@@ -145,15 +144,16 @@
     // ======================
     // ACCESO AL DOM
     // ======================
-    const statusEl        = document.getElementById("status");
-    const oyentesEl       = document.getElementById("recuentoOyentes");
+    const statusEl            = document.getElementById("status");
+    const oyentesEl          = document.getElementById("recuentoOyentes");
     const midiSelectContainer = document.getElementById("midiSelectContainer");
     const grabacionesSelect   = document.getElementById("grabacionesSelect");
-    const btnGrabar       = document.getElementById("btnGrabar");
-    const btnReproducir   = document.getElementById("btnReproducir");
-    const chatLog         = document.getElementById("chatLog");
-    const chatInput       = document.getElementById("chatInput");
-    const sendChatBtn     = document.getElementById("sendChatBtn");
+    const btnGrabar           = document.getElementById("btnGrabar");
+    const btnReproducir       = document.getElementById("btnReproducir");
+    const chatLog             = document.getElementById("chatLog");
+    const chatInput           = document.getElementById("chatInput");
+    const sendChatBtn         = document.getElementById("sendChatBtn");
+    const modoMIDIBtn         = document.querySelector("button[onclick='modoMIDI()']");
 
     // ======================
     // VARIABLES DE ESTADO
@@ -201,6 +201,73 @@
     }
 
     // ======================
+    // PETICIÓN WEB MIDI (punto 3 con shim)
+    // ======================
+    document.addEventListener("DOMContentLoaded", () => {
+      // Dejamos un breve retraso para que el shim se "enganche"
+      setTimeout(() => {
+        if (typeof navigator.requestMIDIAccess !== "function") {
+          statusEl.textContent = "navigator.requestMIDIAccess NO existe. " +
+            "Asegúrate de abrir esta página desde Web MIDI Browser y que sea HTTPS.";
+          return;
+        }
+
+        statusEl.textContent = "requestMIDIAccess detectado, solicitando permisos…";
+
+        navigator.requestMIDIAccess({ sysex: false })
+          .then(onMIDISuccess, onMIDIFailure);
+
+        function onMIDISuccess(midiAccess) {
+          const inputs = Array.from(midiAccess.inputs.values());
+          const outputs = Array.from(midiAccess.outputs.values());
+
+          if (inputs.length === 0 && outputs.length === 0) {
+            statusEl.textContent = "WebMIDI activo, ¡pero no hay puertos MIDI detectados!";
+            return;
+          }
+
+          statusEl.textContent = `WebMIDI OK: ${inputs.length} entrada(s), ${outputs.length} salida(s) detectada(s).`;
+
+          // Llenar un <select> para elegir salida MIDI (opcional)
+          const sel = document.createElement("select");
+          sel.id = "midiOutSelect";
+          const dopt = document.createElement("option");
+          dopt.text = "-- Elige dispositivo MIDI --";
+          dopt.value = "";
+          sel.appendChild(dopt);
+
+          outputs.forEach((o, i) => {
+            const opt = document.createElement("option");
+            opt.value = o.id;
+            opt.text = o.name || `MIDI Dispositivo ${i + 1}`;
+            sel.appendChild(opt);
+          });
+
+          sel.addEventListener("change", e => {
+            const chosen = outputs.find(o => o.id === e.target.value);
+            if (chosen) {
+              output = chosen;
+              statusEl.textContent = `Salida MIDI seleccionada: ${chosen.name}`;
+            } else {
+              statusEl.textContent = "No se ha seleccionado salida MIDI.";
+              output = null;
+            }
+          });
+
+          midiSelectContainer.appendChild(sel);
+
+          // Habilitar el botón de modoMIDI ahora que ya hay salidas
+          modoMIDIBtn.disabled = false;
+        }
+
+        function onMIDIFailure(err) {
+          console.error("No se pudo acceder a Web MIDI:", err);
+          statusEl.textContent = "Error al habilitar WebMIDI: " + err;
+        }
+      }, 50);
+    });
+
+    // ======================
     // FUNCIONES DE GRABACIÓN
     // ======================
     function iniciarGrabacion() {
@@ -240,7 +307,7 @@
       const eventos = grabaciones[idx].eventos;
       if (!eventos.length) return;
 
-      // Calcular duración total: tiempo último evento - tiempo primero
+      // Calcular duración total de la reproducción
       const startTime = eventos[0].time;
       const lastTime = eventos[eventos.length - 1].time;
       const totalMs = lastTime - startTime;
@@ -248,12 +315,12 @@
       // Añadir clase para parpadeo verde
       btnReproducir.classList.add("reproduciendo");
 
-      // Programar quitar clase tras la reproducción (se añade pequeño buffer de 200ms)
+      // Planificar quitar clase al finalizar (con 200ms de buffer)
       setTimeout(() => {
         btnReproducir.classList.remove("reproduciendo");
       }, totalMs + 200);
 
-      // Enviar eventos al WebSocket simulando latencia/cola
+      // Enviar eventos MIDI simulando latencia/cola
       eventos.forEach(ev => {
         const delay = Math.max(0, ev.time - startTime);
         setTimeout(() => {
@@ -355,7 +422,7 @@
         const eventTime = msg.time;
         if (!baseTime) baseTime = performance.now() - eventTime;
 
-        // ←←← GRABAR CADA EVENTO MIDI QUE LLEGA ←←←
+        // ←←← GRABAR cada evento MIDI AL LLEGAR ←←←
         if (grabando) {
           grabacionActual.push({
             data: msg.data,
@@ -413,41 +480,9 @@
     // ======================
     function modoMIDI() {
       modo = "midi";
-      statusEl.innerText = "Buscando dispositivos MIDI de salida…";
-      navigator.requestMIDIAccess().then(midiAccess => {
-        const outputs = Array.from(midiAccess.outputs.values());
-        if (outputs.length) {
-          midiSelectContainer.innerHTML = "";
-          const sel = document.createElement("select");
-          sel.id = "midiOutSelect";
-          const dopt = document.createElement("option");
-          dopt.text = "-- Elige dispositivo MIDI --";
-          dopt.value = "";
-          sel.appendChild(dopt);
-          outputs.forEach((o, i) => {
-            const opt = document.createElement("option");
-            opt.value = o.id;
-            opt.text = o.name || `MIDI Dispositivo ${i + 1}`;
-            sel.appendChild(opt);
-          });
-          sel.addEventListener("change", e => {
-            const chosen = outputs.find(o => o.id === e.target.value);
-            if (chosen) {
-              output = chosen;
-              statusEl.innerText = `Salida MIDI seleccionada: ${chosen.name}`;
-            } else {
-              statusEl.innerText = "No se ha seleccionado salida MIDI.";
-              output = null;
-            }
-          });
-          midiSelectContainer.appendChild(sel);
-          statusEl.innerText = "Selecciona un dispositivo MIDI para usarlo.";
-        } else {
-          statusEl.innerText = "No se han encontrado salidas MIDI.";
-        }
-      }).catch(() => {
-        statusEl.innerText = "No se ha podido acceder a WebMIDI.";
-      });
+      statusEl.innerText = "Modo MIDI: selecciona tu dispositivo…";
+      // El <select> ya fue creado en onMIDISuccess
+      // (no hay que volver a pedir acceso)
     }
 
     async function modoVirtual() {
