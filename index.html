@@ -55,7 +55,6 @@
       50% { opacity: 0.3; }
       100% { opacity: 1; }
     }
-
     /* Chat */
     #chatLog {
       width: 90%;
@@ -82,7 +81,7 @@
       margin-left: 0.5em;
     }
 
-    /* Clase para los mensajes propios (del oyente VIP) en azul */
+    /* Clase para colorear en azul los mensajes propios */
     .chat-mensaje-propio {
       color: blue;
     }
@@ -120,14 +119,14 @@
 
   <script>
     // Elementos
-    const statusEl      = document.getElementById("status");
-    const oyentesEl     = document.getElementById("recuentoOyentes");
+    const statusEl            = document.getElementById("status");
+    const oyentesEl           = document.getElementById("recuentoOyentes");
     const midiSelectContainer = document.getElementById("midiSelectContainer");
     const grabacionesSelect   = document.getElementById("grabacionesSelect");
-    const btnGrabar     = document.getElementById("btnGrabar");
-    const chatLog       = document.getElementById("chatLog");
-    const chatInput     = document.getElementById("chatInput");
-    const sendChatBtn   = document.getElementById("sendChatBtn");
+    const btnGrabar           = document.getElementById("btnGrabar");
+    const chatLog             = document.getElementById("chatLog");
+    const chatInput           = document.getElementById("chatInput");
+    const sendChatBtn         = document.getElementById("sendChatBtn");
 
     // WebSocket
     const ws = new WebSocket("wss://dreamecho.onrender.com");
@@ -140,7 +139,7 @@
     let primeraEstadisticaMostrada = false;
 
     // Nombre de usuario para el chat
-    const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente VIP") || "Oyente VIP";
+    const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
 
     // Carga inicial de grabaciones
     window.onload = () => {
@@ -260,18 +259,23 @@
       statusEl.innerText = `Descargando ${grabaciones[idx].nombre}.mid`;
     }
 
-    // Función appendChat modificada para colorear en azul los mensajes propios
+    // ------------------------------
+    // Modificación aquí: appendChat
     function appendChat(user, text) {
       const msg = document.createElement("div");
       const time = new Date().toLocaleTimeString();
-      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text> >}`;
-      // Si el mensaje lo envía el propio oyente VIP, aplicamos la clase .chat-mensaje-propio
+      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text>`;
+
+      // Si el autor coincide con nuestro username, aplicamos la clase para 
+      // colorear el mensaje en azul
       if (user === username) {
         msg.classList.add("chat-mensaje-propio");
       }
+
       chatLog.appendChild(msg);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
+    // ------------------------------
 
     function sendChat() {
       const text = chatInput.value.trim();
@@ -333,6 +337,12 @@
             synth.triggerAttack(freq, undefined, velocity / 127);
             notasActivas.add(freq);
             notasSostenidas.delete(freq);
+            // Si estamos grabando, almacenamos el evento
+            if (grabando) {
+              const now = performance.now();
+              const tiempoRelativo = baseTime === null ? 0 : now - baseTime;
+              grabacionActual.push({ time: tiempoRelativo, data: msg.data });
+            }
           } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
             if (pedal) {
               notasActivas.delete(freq);
