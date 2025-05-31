@@ -3,8 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <title>DreamEcho - Oyente VIP</title>
+
+  <!-- 1) Cargar Tone.js (sin cambios) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.0.5/build/MidiWriter.min.js"></script>
+
+  <!-- 2) Cargar midi-writer-js desde unpkg para que MidiWriter esté disponible -->
+  <script src="https://unpkg.com/midi-writer-js@2.0.5/build/MidiWriter.min.js"></script>
+
   <style>
     body {
       font-family: sans-serif;
@@ -127,17 +132,18 @@
     <div id="descargaLink"></div>
   </div>
 
+  <!-- 3) Nuestro código principal, ya con MidiWriter disponible en la ventana -->
   <script>
-    // Elementos
-    const statusEl      = document.getElementById("status");
-    const oyentesEl     = document.getElementById("recuentoOyentes");
+    // Elementos del DOM
+    const statusEl          = document.getElementById("status");
+    const oyentesEl         = document.getElementById("recuentoOyentes");
     const midiSelectContainer = document.getElementById("midiSelectContainer");
     const grabacionesSelect   = document.getElementById("grabacionesSelect");
-    const btnGrabar     = document.getElementById("btnGrabar");
-    const chatLog       = document.getElementById("chatLog");
-    const chatInput     = document.getElementById("chatInput");
-    const sendChatBtn   = document.getElementById("sendChatBtn");
-    const descargaLinkDiv = document.getElementById("descargaLink");
+    const btnGrabar         = document.getElementById("btnGrabar");
+    const chatLog           = document.getElementById("chatLog");
+    const chatInput         = document.getElementById("chatInput");
+    const sendChatBtn       = document.getElementById("sendChatBtn");
+    const descargaLinkDiv   = document.getElementById("descargaLink");
 
     // WebSocket
     const ws = new WebSocket("wss://dreamecho.onrender.com");
@@ -145,14 +151,17 @@
     // Variables de MIDI y grabación
     let output = null, modo = null, synth = null, pedal = false;
     let baseTime = null, queuePos = 0, queueLatency = 100;
-    const notasActivas = new Set(), notasSostenidas = new Set();
-    let grabando = false, grabacionActual = [], grabaciones = [];
+    const notasActivas     = new Set();
+    const notasSostenidas  = new Set();
+    let grabando = false;
+    let grabacionActual = [];
+    let grabaciones = [];
     let primeraEstadisticaMostrada = false;
 
     // Nombre de usuario para el chat
     const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
 
-    // Carga inicial de grabaciones
+    // Al cargar la página, recuperamos las grabaciones de localStorage si existen
     window.onload = () => {
       const guardadas = localStorage.getItem("dreamEchoGrabaciones");
       if (guardadas) {
@@ -181,7 +190,8 @@
       baseTime = null;
       statusEl.innerText = "Grabando… toca algo desde el piano.";
       btnGrabar.classList.add("grabando");
-      // Limpiar el enlace de descarga anterior
+
+      // Limpiar enlace de descarga anterior
       descargaLinkDiv.innerHTML = "";
       console.log("[grabación] Iniciada. grabacionActual vacía.");
     }
@@ -208,8 +218,10 @@
     function reproducirGrabacion() {
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") return;
+
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
+
       const eventos = grabaciones[idx].eventos;
       eventos.forEach(ev => {
         const delay = Math.max(0, ev.time - eventos[0].time);
@@ -226,14 +238,18 @@
     function borrarGrabacion() {
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") return;
+
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
+
       if (!confirm(`¿Borrar "${grabaciones[idx].nombre}"?`)) return;
+
       console.log(`[grabación] Borrando índice ${idx}: "${grabaciones[idx].nombre}".`);
       grabaciones.splice(idx, 1);
       guardarEnLocalStorage();
       actualizarListaGrabaciones();
       statusEl.innerText = "Grabación borrada.";
+
       // Limpiar enlace de descarga si existía
       descargaLinkDiv.innerHTML = "";
     }
@@ -241,8 +257,10 @@
     function renombrarGrabacion() {
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") return;
+
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
+
       const nuevo = prompt("Nuevo nombre:", grabaciones[idx].nombre);
       if (nuevo) {
         console.log(`[grabación] Renombrada índice ${idx} a "${nuevo}".`);
@@ -255,7 +273,8 @@
 
     function descargarGrabacion() {
       console.log("[descarga] Botón pulsado.");
-      // Convertir el valor del <select> a índice numérico
+
+      // 1) Convertir el valor del <select> a índice numérico
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") {
         statusEl.innerText = "No hay grabación seleccionada.";
@@ -276,7 +295,14 @@
         return;
       }
 
-      // Crear el track de MIDI
+      // 2) Verificar que la librería MidiWriter existe
+      if (typeof MidiWriter === "undefined") {
+        console.error("[descarga] MidiWriter no está definido. ¿Fallo en la carga del script?");
+        statusEl.innerText = "Error: no se ha cargado MidiWriter.";
+        return;
+      }
+
+      // 3) Crear el track de MIDI
       const track = new MidiWriter.Track();
       track.setTempo(90);
       track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
@@ -299,15 +325,15 @@
         }
       });
 
-      // Generar el archivo .mid
+      // 4) Generar el archivo .mid
       const writer = new MidiWriter.Writer(track);
       const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
       const url = URL.createObjectURL(blob);
 
-      // Limpiar contenedor de enlaces anteriores
+      // 5) Limpiar contenedor de enlaces anteriores
       descargaLinkDiv.innerHTML = "";
 
-      // Crear enlace visible en caso de que el clic automático falle
+      // 6) Crear enlace visible en caso de que el clic automático falle
       const aVisible = document.createElement("a");
       const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`)
         .replace(/\s+/g, "_") + ".mid";
@@ -316,15 +342,14 @@
       aVisible.textContent = "Si no descarga automáticamente, haz clic aquí";
       descargaLinkDiv.appendChild(aVisible);
 
-      // Intentar disparar la descarga automáticamente
+      // 7) Intentar disparar la descarga automáticamente
       setTimeout(() => {
-        // El clic forzado puede no funcionar en algunos navegadores, pero probamos
         aVisible.click();
         console.log(`[descarga] Intento de clic automático para "${nombreArchivo}".`);
         statusEl.innerText = `Descargando ${nombreArchivo}`;
       }, 100);
 
-      // Liberar el objeto URL pasado un rato
+      // 8) Revocar la URL pasado un ratito (para liberar memoria)
       setTimeout(() => {
         URL.revokeObjectURL(url);
         console.log(`[descarga] URL revocada para "${nombreArchivo}".`);
@@ -450,10 +475,10 @@
           dopt.text = "-- Elige dispositivo MIDI --";
           dopt.value = "";
           sel.appendChild(dopt);
-          outputs.forEach((o,i) => {
+          outputs.forEach((o, i) => {
             const opt = document.createElement("option");
             opt.value = o.id;
-            opt.text = o.name || `MIDI Dispositivo ${i+1}`;
+            opt.text = o.name || `MIDI Dispositivo ${i + 1}`;
             sel.appendChild(opt);
           });
           sel.addEventListener("change", e => {
@@ -482,17 +507,17 @@
       await Tone.start();
       synth = new Tone.Sampler({
         urls: {
-          A0: "A0.mp3", C1: "C1.mp3", "D#1":"Ds1.mp3","F#1":"Fs1.mp3",
-          A1:"A1.mp3", C2:"C2.mp3","D#2":"Ds2.mp3","F#2":"Fs2.mp3",
-          A2:"A2.mp3", C3:"C3.mp3","D#3":"Ds3.mp3","F#3":"Fs3.mp3",
-          A3:"A3.mp3", C4:"C4.mp3","D#4":"Ds4.mp3","F#4":"Fs4.mp3",
-          A4:"A4.mp3", C5:"C5.mp3","D#5":"Ds5.mp3","F#5":"Fs5.mp3",
-          A5:"A5.mp3", C6:"C6.mp3","D#6":"Ds6.mp3","F#6":"Fs6.mp3",
-          A7:"A7.mp3", C8:"C8.mp3"
+          A0:  "A0.mp3", C1:  "C1.mp3", "D#1":"Ds1.mp3","F#1":"Fs1.mp3",
+          A1:  "A1.mp3", C2:  "C2.mp3","D#2":"Ds2.mp3","F#2":"Fs2.mp3",
+          A2:  "A2.mp3", C3:  "C3.mp3","D#3":"Ds3.mp3","F#3":"Fs3.mp3",
+          A3:  "A3.mp3", C4:  "C4.mp3","D#4":"Ds4.mp3","F#4":"Fs4.mp3",
+          A4:  "A4.mp3", C5:  "C5.mp3","D#5":"Ds5.mp3","F#5":"Fs5.mp3",
+          A5:  "A5.mp3", C6:  "C6.mp3","D#6":"Ds6.mp3","F#6":"Fs6.mp3",
+          A7:  "A7.mp3", C8:  "C8.mp3"
         },
-        baseUrl:"https://tonejs.github.io/audio/salamander/",
-        release:0.4,
-        onload:() => {
+        baseUrl: "https://tonejs.github.io/audio/salamander/",
+        release: 0.4,
+        onload: () => {
           statusEl.innerText =
             `Modo virtual listo. Posición en cola: ${queuePos} → latencia ≃ ${Math.round(queueLatency)} ms`;
         }
