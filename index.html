@@ -322,8 +322,20 @@
 
       // 1) Crear un track MIDI a 90 BPM y asignar instrumento (piano = 1)
       const track = new MidiWriter.Track();
+      // Tempo 90 BPM (Meta Set Tempo)
       track.setTempo(90);
-      track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
+      // Time Signature 4/4 (Meta Time Signature)
+      track.addEvent(new MidiWriter.TimeSignatureEvent({
+        numerator: 4,
+        denominator: 4,
+        metronome: 24,
+        thirtyseconds: 8
+      }));
+      // Program Change: Piano clásico (instrumento 1) en canal 0
+      track.addEvent(new MidiWriter.ProgramChangeEvent({
+        instrument: 1,
+        channel: 0
+      }));
 
       // 2) Tomar como referencia el timestamp del primer evento
       const startTime = eventos[0].time;
@@ -338,9 +350,10 @@
           const deltaTicks = Math.round(deltaMs / 10);
           track.addEvent(new MidiWriter.NoteEvent({
             pitch: [ midiNumberToNoteName(note) ],
-            duration: 'T120',   // Duración fija; puedes ajustar si quieres
+            duration: 'T128',   // 1 negra exacta (128 ticks)
             startTick: deltaTicks,
-            velocity: vel / 127
+            velocity: vel / 127,
+            channel: 0
           }));
         }
       });
