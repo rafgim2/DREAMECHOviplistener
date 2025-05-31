@@ -261,12 +261,9 @@
     function appendChat(user, text) {
       const msg = document.createElement("div");
       const time = new Date().toLocaleTimeString();
-
-      // Si el autor coincide con el oyente actual, le aplicamos la clase "mensaje-propio"
       if (user === username) {
         msg.classList.add("mensaje-propio");
       }
-
       msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text}`;
       chatLog.appendChild(msg);
       chatLog.scrollTop = chatLog.scrollHeight;
@@ -314,6 +311,16 @@
         const command = st & 0xf0;
         const eventTime = msg.time;
         if (!baseTime) baseTime = performance.now() - eventTime;
+
+        // ←←← AÑADIDO PARA GRABAR CADA EVENTO MIDI ←←←
+        if (grabando) {
+          grabacionActual.push({
+            data: msg.data,
+            time: eventTime
+          });
+        }
+        // ←←← FIN DE LA ADICIÓN PARA GRABAR ←←←
+
         const extra = modo === "virtual" ? queueLatency : 0;
         const delay = Math.max(0,
           eventTime + baseTime - performance.now() + extra
