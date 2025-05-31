@@ -80,6 +80,11 @@
       cursor: pointer;
       margin-left: 0.5em;
     }
+
+    /* Clase para los mensajes propios en azul */
+    .chat-mensaje-propio {
+      color: blue;
+    }
   </style>
 </head>
 <body>
@@ -254,10 +259,16 @@
       statusEl.innerText = `Descargando ${grabaciones[idx].nombre}.mid`;
     }
 
+    // Función appendChat ajustada: si user === username, se añade la clase para ponerlo en azul
     function appendChat(user, text) {
       const msg = document.createElement("div");
       const time = new Date().toLocaleTimeString();
-      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text}`;
+      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text>`;
+
+      if (user === username) {
+        msg.classList.add("chat-mensaje-propio");
+      }
+
       chatLog.appendChild(msg);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
