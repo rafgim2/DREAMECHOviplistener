@@ -4,10 +4,10 @@
   <meta charset="UTF-8" />
   <title>DreamEcho - Oyente VIP</title>
 
-  <!-- 1) Cargar Tone.js (sin cambios) -->
+  <!-- 1) Tone.js (para reproducción virtual) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.min.js"></script>
 
-  <!-- 2) Cargar midi-writer-js desde unpkg para que MidiWriter esté disponible -->
+  <!-- 2) MidiWriter.js: debe cargarse ANTES de que empiece nuestro código -->
   <script src="https://unpkg.com/midi-writer-js@2.0.5/build/MidiWriter.min.js"></script>
 
   <style>
@@ -127,12 +127,13 @@
     <button onclick="reproducirGrabacion()">▶️ Reproducir</button>
     <button onclick="borrarGrabacion()">🗑️ Borrar</button>
     <button onclick="renombrarGrabacion()">✏️ Renombrar</button>
-    <button onclick="descargarGrabacion()">💾 Descargar .mid</button>
-    <!-- Contenedor donde se mostrará un enlace si la descarga no se dispara automáticamente -->
+    <!-- Este es el botón que genera y descarga el .mid vía MidiWriter.js -->
+    <button onclick="descargarGrabacionComoMID()">💾 Descargar .mid</button>
+    <!-- En caso de que el clic automático falle, mostramos aquí un enlace manual -->
     <div id="descargaLink"></div>
   </div>
 
-  <!-- 3) Nuestro código principal, ya con MidiWriter disponible en la ventana -->
+  <!-- CODIGO PRINCIPAL (debe ir después de cargar Tone.js y MidiWriter.js) -->
   <script>
     // Elementos del DOM
     const statusEl          = document.getElementById("status");
@@ -190,8 +191,6 @@
       baseTime = null;
       statusEl.innerText = "Grabando… toca algo desde el piano.";
       btnGrabar.classList.add("grabando");
-
-      // Limpiar enlace de descarga anterior
       descargaLinkDiv.innerHTML = "";
       console.log("[grabación] Iniciada. grabacionActual vacía.");
     }
@@ -249,8 +248,6 @@
       guardarEnLocalStorage();
       actualizarListaGrabaciones();
       statusEl.innerText = "Grabación borrada.";
-
-      // Limpiar enlace de descarga si existía
       descargaLinkDiv.innerHTML = "";
     }
 
@@ -271,10 +268,10 @@
       }
     }
 
-    function descargarGrabacion() {
+    // ==== FUNCIÓN PARA GENERAR y DESCARGAR EL .mid REAL ====
+    function descargarGrabacionComoMID() {
       console.log("[descarga] Botón pulsado.");
 
-      // 1) Convertir el valor del <select> a índice numérico
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") {
         statusEl.innerText = "No hay grabación seleccionada.";
@@ -295,45 +292,47 @@
         return;
       }
 
-      // 2) Verificar que la librería MidiWriter existe
+      // Verificamos que MidiWriter esté definido
       if (typeof MidiWriter === "undefined") {
         console.error("[descarga] MidiWriter no está definido. ¿Fallo en la carga del script?");
         statusEl.innerText = "Error: no se ha cargado MidiWriter.";
         return;
       }
 
-      // 3) Crear el track de MIDI
+      // 1) Crear track MIDI a 90 BPM y asignar instrumento (piano=1)
       const track = new MidiWriter.Track();
       track.setTempo(90);
       track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
 
-      const startTime = eventos[0].time; // timestamp del primer evento
+      // 2) Tomar timestamp del primer evento como referencia de tiempo
+      const startTime = eventos[0].time;
 
-      // Recorrer cada evento y añadir solo las notas ON (0x90 con vel > 0)
+      // 3) Convertir cada evento MIDI guardado a un NoteEvent del track
       eventos.forEach(ev => {
         const [st, note, vel] = ev.data;
         const command = st & 0xf0;
+        // Solo añadimos las notas ON (0x90 con velocity > 0)
         if (command === 0x90 && vel > 0) {
           const deltaMs = ev.time - startTime;
           const deltaTicks = Math.round(deltaMs / 10);
           track.addEvent(new MidiWriter.NoteEvent({
             pitch: [MidiWriter.Utils.midiNumberToNoteName(note)],
-            duration: 'T120',
+            duration: 'T120',      // Puedes ajustar duración si hace falta
             startTick: deltaTicks,
             velocity: vel / 127
           }));
         }
       });
 
-      // 4) Generar el archivo .mid
+      // 4) Generar el .mid y crear un Blob
       const writer = new MidiWriter.Writer(track);
       const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
       const url = URL.createObjectURL(blob);
 
-      // 5) Limpiar contenedor de enlaces anteriores
+      // 5) Limpiar contenedor de enlace anterior
       descargaLinkDiv.innerHTML = "";
 
-      // 6) Crear enlace visible en caso de que el clic automático falle
+      // 6) Crear enlace visible (en caso de que el clic automático sea bloqueado)
       const aVisible = document.createElement("a");
       const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`)
         .replace(/\s+/g, "_") + ".mid";
@@ -349,13 +348,14 @@
         statusEl.innerText = `Descargando ${nombreArchivo}`;
       }, 100);
 
-      // 8) Revocar la URL pasado un ratito (para liberar memoria)
+      // 8) Revocar URL tras un tiempo para liberar memoria
       setTimeout(() => {
         URL.revokeObjectURL(url);
         console.log(`[descarga] URL revocada para "${nombreArchivo}".`);
       }, 30000);
     }
 
+    // ==== Resto del código (chat, WebSocket, modo MIDI/Virtual) ====
     function appendChat(user, text) {
       const msg = document.createElement("div");
       const time = new Date().toLocaleTimeString();
