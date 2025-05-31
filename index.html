@@ -175,7 +175,7 @@
     const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
 
     // ======================
-    // WEB SOCKET
+    // WEBSOCKET
     // ======================
     const ws = new WebSocket("wss://dreamecho.onrender.com");
 
@@ -288,7 +288,7 @@
     }
 
     // ======================
-    // DESCARGA DEL .mid VÁLIDO
+    // DESCARGA DEL .mid VÁLIDO (Formato 1, 2 pistas)
     // ======================
     function descargarGrabacionComoMID() {
       console.log("[descarga] Botón pulsado.");
@@ -320,27 +320,25 @@
         return;
       }
 
-      // 1) Crear un track MIDI a 90 BPM y asignar instrumento (piano = 1)
-      const track = new MidiWriter.Track();
-      // Tempo 90 BPM (Meta Set Tempo)
-      track.setTempo(90);
-      // Time Signature 4/4 (Meta Time Signature)
-      track.addEvent(new MidiWriter.TimeSignatureEvent({
+      // 1) Crear Pista 0: Metadatos (Tempo, Time Signature)
+      const track0 = new MidiWriter.Track();
+      track0.setTempo(90);
+      track0.addEvent(new MidiWriter.TimeSignatureEvent({
         numerator: 4,
         denominator: 4,
         metronome: 24,
         thirtyseconds: 8
       }));
-      // Program Change: Piano clásico (instrumento 1) en canal 0
-      track.addEvent(new MidiWriter.ProgramChangeEvent({
+
+      // 2) Crear Pista 1: Program Change + NoteEvents
+      const track1 = new MidiWriter.Track();
+      track1.addEvent(new MidiWriter.ProgramChangeEvent({
         instrument: 1,
         channel: 0
       }));
 
-      // 2) Tomar como referencia el timestamp del primer evento
+      // 3) Convertir eventos en NoteEvent en track1
       const startTime = eventos[0].time;
-
-      // 3) Convertir cada evento guardado en NoteEvent
       eventos.forEach(ev => {
         const [st, note, vel] = ev.data;
         const command = st & 0xf0;
@@ -348,7 +346,7 @@
         if (command === 0x90 && vel > 0) {
           const deltaMs = ev.time - startTime;
           const deltaTicks = Math.round(deltaMs / 10);
-          track.addEvent(new MidiWriter.NoteEvent({
+          track1.addEvent(new MidiWriter.NoteEvent({
             pitch: [ midiNumberToNoteName(note) ],
             duration: 'T128',   // 1 negra exacta (128 ticks)
             startTick: deltaTicks,
@@ -358,8 +356,8 @@
         }
       });
 
-      // 4) Generar el array de bytes del .mid y crear un Blob
-      const writer = new MidiWriter.Writer(track);
+      // 4) Generar Writer con ambas pistas (formato 1)
+      const writer = new MidiWriter.Writer([track0, track1]);
       const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
       const url = URL.createObjectURL(blob);
 
