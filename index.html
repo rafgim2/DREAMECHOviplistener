@@ -7,9 +7,6 @@
   <!-- 1) Tone.js (para síntesis virtual si usas modo “virtual”) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.39/Tone.min.js"></script>
 
-  <!-- 2) MidiWriter.js (Browser build 3.1.1) -->
-  <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@3.1.1/browser/midiwriter.min.js"></script>
-
   <style>
     body {
       font-family: sans-serif;
@@ -60,6 +57,17 @@
       50% { opacity: 0.3; }
       100% { opacity: 1; }
     }
+    /* Parpadeo verde para reproducción */
+    button.reproduciendo {
+      animation: parpadeoVerde 1s infinite;
+      background-color: green;
+      color: white;
+    }
+    @keyframes parpadeoVerde {
+      0% { opacity: 1; }
+      50% { opacity: 0.3; }
+      100% { opacity: 1; }
+    }
     /* Chat */
     #chatLog {
       width: 90%;
@@ -89,15 +97,6 @@
     .mensaje-propio {
       color: blue;
     }
-    /* Contenedor para el enlace de descarga manual */
-    #descargaLink {
-      margin-top: 1em;
-      font-size: 1em;
-    }
-    #descargaLink a {
-      color: #0066cc;
-      text-decoration: underline;
-    }
   </style>
 </head>
 <body>
@@ -124,13 +123,9 @@
     <select id="grabacionesSelect">
       <option value="">-- Elige una grabación --</option>
     </select>
-    <button onclick="reproducirGrabacion()">▶️ Reproducir</button>
+    <button id="btnReproducir" onclick="reproducirGrabacion()">▶️ Reproducir</button>
     <button onclick="borrarGrabacion()">🗑️ Borrar</button>
     <button onclick="renombrarGrabacion()">✏️ Renombrar</button>
-    <!-- Botón que genera y descarga el .mid usando MidiWriter.js -->
-    <button onclick="descargarGrabacionComoMID()">💾 Descargar .mid</button>
-    <!-- Si el clic automático falla, aparecerá este enlace -->
-    <div id="descargaLink"></div>
   </div>
 
   <script>
@@ -154,10 +149,10 @@
     const midiSelectContainer = document.getElementById("midiSelectContainer");
     const grabacionesSelect   = document.getElementById("grabacionesSelect");
     const btnGrabar       = document.getElementById("btnGrabar");
+    const btnReproducir   = document.getElementById("btnReproducir");
     const chatLog         = document.getElementById("chatLog");
     const chatInput       = document.getElementById("chatInput");
     const sendChatBtn     = document.getElementById("sendChatBtn");
-    const descargaLinkDiv = document.getElementById("descargaLink");
 
     // ======================
     // VARIABLES DE ESTADO
@@ -213,7 +208,6 @@
       baseTime = null;
       statusEl.innerText = "Grabando… toca algo desde el piano.";
       btnGrabar.classList.add("grabando");
-      descargaLinkDiv.innerHTML = "";  // Limpiar enlace viejo (por si existe)
       console.log("[grabación] Iniciada. grabacionActual vacía.");
     }
 
@@ -243,14 +237,31 @@
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
 
       const eventos = grabaciones[idx].eventos;
+      if (!eventos.length) return;
+
+      // Calcular duración total: tiempo último evento - tiempo primero
+      const startTime = eventos[0].time;
+      const lastTime = eventos[eventos.length - 1].time;
+      const totalMs = lastTime - startTime;
+
+      // Añadir clase para parpadeo verde
+      btnReproducir.classList.add("reproduciendo");
+
+      // Programar quitar clase tras la reproducción (se añade pequeño buffer de 200ms)
+      setTimeout(() => {
+        btnReproducir.classList.remove("reproduciendo");
+      }, totalMs + 200);
+
+      // Enviar eventos al WebSocket simulando latencia/cola
       eventos.forEach(ev => {
-        const delay = Math.max(0, ev.time - eventos[0].time);
+        const delay = Math.max(0, ev.time - startTime);
         setTimeout(() => {
           ws.dispatchEvent(new MessageEvent("message", {
             data: JSON.stringify({ type: "midi", data: ev.data, time: 0 })
           }));
         }, delay);
       });
+
       statusEl.innerText = `Reproduciendo: ${grabaciones[idx].nombre}`;
       console.log(`[reproducción] Iniciada "${grabaciones[idx].nombre}" con ${eventos.length} eventos.`);
     }
@@ -268,7 +279,6 @@
       guardarEnLocalStorage();
       actualizarListaGrabaciones();
       statusEl.innerText = "Grabación borrada.";
-      descargaLinkDiv.innerHTML = "";
     }
 
     function renombrarGrabacion() {
@@ -285,107 +295,6 @@
         actualizarListaGrabaciones();
         statusEl.innerText = `Grabación renombrada a "${nuevo}".`;
       }
-    }
-
-    // ======================
-    // DESCARGA DEL .mid VÁLIDO (Formato 0, canal 1)
-    // ======================
-    function descargarGrabacionComoMID() {
-      console.log("[descarga] Botón pulsado.");
-
-      const idxStr = grabacionesSelect.value;
-      if (idxStr === "") {
-        statusEl.innerText = "No hay grabación seleccionada.";
-        console.warn("[descarga] No hay grabación seleccionada (idxStr vacío).");
-        return;
-      }
-      const idx = parseInt(idxStr, 10);
-      if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) {
-        statusEl.innerText = "Índice de grabación inválido.";
-        console.error(`[descarga] Índice inválido: ${idxStr}`);
-        return;
-      }
-
-      const eventos = grabaciones[idx].eventos;
-      if (!eventos || eventos.length === 0) {
-        statusEl.innerText = "No hay eventos en esta grabación.";
-        console.warn(`[descarga] Grabación "${grabaciones[idx].nombre}" sin eventos.`);
-        return;
-      }
-
-      // Verificar que MidiWriter está disponible
-      if (typeof MidiWriter === "undefined") {
-        console.error("[descarga] MidiWriter no está definido. Comprueba que se cargó correctamente.");
-        statusEl.innerText = "Error: no se ha cargado MidiWriter.js";
-        return;
-      }
-
-      // 1) Crear un único track (Formato 0) con metadatos + notas
-      const track = new MidiWriter.Track();
-
-      // 1.a) Tempo 90 BPM (Meta Set Tempo)
-      track.setTempo(90);
-      // 1.b) Time Signature 4/4 (Meta Time Signature)
-      track.addEvent(new MidiWriter.TimeSignatureEvent({
-        numerator: 4,
-        denominator: 4,
-        metronome: 24,
-        thirtyseconds: 8
-      }));
-      // 1.c) Program Change: Piano clásico (instrumento 1) en canal 1
-      track.addEvent(new MidiWriter.ProgramChangeEvent({
-        instrument: 1,
-        channel: 1
-      }));
-
-      // 2) Convertir eventos en NoteEvent en el mismo track (canal 1)
-      const startTime = eventos[0].time;
-      eventos.forEach(ev => {
-        const [st, note, vel] = ev.data;
-        const command = st & 0xf0;
-        // Solo notas ON (0x90 con velocity > 0)
-        if (command === 0x90 && vel > 0) {
-          const deltaMs = ev.time - startTime;
-          const deltaTicks = Math.round(deltaMs / 10);
-          track.addEvent(new MidiWriter.NoteEvent({
-            pitch: [ midiNumberToNoteName(note) ],
-            duration: 'T128',   // 1 negra exacta (128 ticks)
-            startTick: deltaTicks,
-            velocity: vel / 127,
-            channel: 1
-          }));
-        }
-      });
-
-      // 3) Generar Writer en Formato 0 (single track)
-      const writer = new MidiWriter.Writer(track);
-      const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
-      const url = URL.createObjectURL(blob);
-
-      // 4) Limpiar contenedor de enlace anterior
-      descargaLinkDiv.innerHTML = "";
-
-      // 5) Crear un <a> visible (por si el clic automático falla)
-      const aVisible = document.createElement("a");
-      const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`)
-        .replace(/\s+/g, "_") + ".mid";
-      aVisible.href = url;
-      aVisible.download = nombreArchivo;
-      aVisible.textContent = "Si no descarga automáticamente, haz clic aquí";
-      descargaLinkDiv.appendChild(aVisible);
-
-      // 6) Intentar disparar la descarga automáticamente
-      setTimeout(() => {
-        aVisible.click();
-        console.log(`[descarga] Intento de clic automático para "${nombreArchivo}".`);
-        statusEl.innerText = `Descargando ${nombreArchivo}`;
-      }, 100);
-
-      // 7) Revocar la URL pasado un rato para liberar memoria
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-        console.log(`[descarga] URL revocada para "${nombreArchivo}".`);
-      }, 30000);
     }
 
     // ======================
