@@ -84,6 +84,15 @@
     .mensaje-propio {
       color: blue;
     }
+    /* Contenedor para el enlace de descarga */
+    #descargaLink {
+      margin-top: 1em;
+      font-size: 1em;
+    }
+    #descargaLink a {
+      color: #0066cc;
+      text-decoration: underline;
+    }
   </style>
 </head>
 <body>
@@ -114,6 +123,8 @@
     <button onclick="borrarGrabacion()">🗑️ Borrar</button>
     <button onclick="renombrarGrabacion()">✏️ Renombrar</button>
     <button onclick="descargarGrabacion()">💾 Descargar .mid</button>
+    <!-- Contenedor donde se mostrará un enlace si la descarga no se dispara automáticamente -->
+    <div id="descargaLink"></div>
   </div>
 
   <script>
@@ -126,6 +137,7 @@
     const chatLog       = document.getElementById("chatLog");
     const chatInput     = document.getElementById("chatInput");
     const sendChatBtn   = document.getElementById("sendChatBtn");
+    const descargaLinkDiv = document.getElementById("descargaLink");
 
     // WebSocket
     const ws = new WebSocket("wss://dreamecho.onrender.com");
@@ -169,6 +181,9 @@
       baseTime = null;
       statusEl.innerText = "Grabando… toca algo desde el piano.";
       btnGrabar.classList.add("grabando");
+      // Limpiar el enlace de descarga anterior
+      descargaLinkDiv.innerHTML = "";
+      console.log("[grabación] Iniciada. grabacionActual vacía.");
     }
 
     function detenerGrabacion() {
@@ -183,14 +198,18 @@
         guardarEnLocalStorage();
         actualizarListaGrabaciones();
         statusEl.innerText = `${nueva.nombre} guardada.`;
+        console.log(`[grabación] Detenida. ${grabacionActual.length} eventos almacenados.`);
       } else {
         statusEl.innerText = "Nada grabado.";
+        console.log("[grabación] Detenida. grabacionActual sigue vacía.");
       }
     }
 
     function reproducirGrabacion() {
-      const idx = grabacionesSelect.value;
-      if (idx === "") return;
+      const idxStr = grabacionesSelect.value;
+      if (idxStr === "") return;
+      const idx = parseInt(idxStr, 10);
+      if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
       const eventos = grabaciones[idx].eventos;
       eventos.forEach(ev => {
         const delay = Math.max(0, ev.time - eventos[0].time);
@@ -201,23 +220,32 @@
         }, delay);
       });
       statusEl.innerText = `Reproduciendo: ${grabaciones[idx].nombre}`;
+      console.log(`[reproducción] Iniciada "${grabaciones[idx].nombre}" con ${eventos.length} eventos.`);
     }
 
     function borrarGrabacion() {
-      const idx = grabacionesSelect.value;
-      if (idx === "") return;
+      const idxStr = grabacionesSelect.value;
+      if (idxStr === "") return;
+      const idx = parseInt(idxStr, 10);
+      if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
       if (!confirm(`¿Borrar "${grabaciones[idx].nombre}"?`)) return;
+      console.log(`[grabación] Borrando índice ${idx}: "${grabaciones[idx].nombre}".`);
       grabaciones.splice(idx, 1);
       guardarEnLocalStorage();
       actualizarListaGrabaciones();
       statusEl.innerText = "Grabación borrada.";
+      // Limpiar enlace de descarga si existía
+      descargaLinkDiv.innerHTML = "";
     }
 
     function renombrarGrabacion() {
-      const idx = grabacionesSelect.value;
-      if (idx === "") return;
+      const idxStr = grabacionesSelect.value;
+      if (idxStr === "") return;
+      const idx = parseInt(idxStr, 10);
+      if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) return;
       const nuevo = prompt("Nuevo nombre:", grabaciones[idx].nombre);
       if (nuevo) {
+        console.log(`[grabación] Renombrada índice ${idx} a "${nuevo}".`);
         grabaciones[idx].nombre = nuevo;
         guardarEnLocalStorage();
         actualizarListaGrabaciones();
@@ -226,28 +254,31 @@
     }
 
     function descargarGrabacion() {
+      console.log("[descarga] Botón pulsado.");
       // Convertir el valor del <select> a índice numérico
       const idxStr = grabacionesSelect.value;
       if (idxStr === "") {
         statusEl.innerText = "No hay grabación seleccionada.";
+        console.warn("[descarga] No hay grabación seleccionada (idxStr vacío).");
         return;
       }
       const idx = parseInt(idxStr, 10);
       if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) {
         statusEl.innerText = "Índice de grabación inválido.";
+        console.error(`[descarga] Índice inválido: ${idxStr}`);
         return;
       }
 
       const eventos = grabaciones[idx].eventos;
       if (!eventos || eventos.length === 0) {
         statusEl.innerText = "No hay eventos en esta grabación.";
+        console.warn(`[descarga] Grabación "${grabaciones[idx].nombre}" sin eventos.`);
         return;
       }
 
       // Crear el track de MIDI
       const track = new MidiWriter.Track();
       track.setTempo(90);
-      // Cambiar al instrumento 1 (acoustic grand piano, por ejemplo)
       track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
 
       const startTime = eventos[0].time; // timestamp del primer evento
@@ -257,13 +288,11 @@
         const [st, note, vel] = ev.data;
         const command = st & 0xf0;
         if (command === 0x90 && vel > 0) {
-          // Calcular delta en milisegundos relativo al primer evento
           const deltaMs = ev.time - startTime;
-          // Convertir a "ticks" redondeando
           const deltaTicks = Math.round(deltaMs / 10);
           track.addEvent(new MidiWriter.NoteEvent({
             pitch: [MidiWriter.Utils.midiNumberToNoteName(note)],
-            duration: 'T120',       // Duración fija; ajustar si hace falta
+            duration: 'T120',
             startTick: deltaTicks,
             velocity: vel / 127
           }));
@@ -275,19 +304,31 @@
       const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
       const url = URL.createObjectURL(blob);
 
-      // Crear enlace temporal para forzar la descarga
-      const a = document.createElement("a");
-      a.href = url;
-      // Nombre del archivo: nombre de la grabación con espacios reemplazados
-      const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`).replace(/\s+/g, "_") + ".mid";
-      a.download = nombreArchivo;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      // Liberar el objeto URL
-      URL.revokeObjectURL(url);
+      // Limpiar contenedor de enlaces anteriores
+      descargaLinkDiv.innerHTML = "";
 
-      statusEl.innerText = `Descargando ${nombreArchivo}`;
+      // Crear enlace visible en caso de que el clic automático falle
+      const aVisible = document.createElement("a");
+      const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`)
+        .replace(/\s+/g, "_") + ".mid";
+      aVisible.href = url;
+      aVisible.download = nombreArchivo;
+      aVisible.textContent = "Si no descarga automáticamente, haz clic aquí";
+      descargaLinkDiv.appendChild(aVisible);
+
+      // Intentar disparar la descarga automáticamente
+      setTimeout(() => {
+        // El clic forzado puede no funcionar en algunos navegadores, pero probamos
+        aVisible.click();
+        console.log(`[descarga] Intento de clic automático para "${nombreArchivo}".`);
+        statusEl.innerText = `Descargando ${nombreArchivo}`;
+      }, 100);
+
+      // Liberar el objeto URL pasado un rato
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        console.log(`[descarga] URL revocada para "${nombreArchivo}".`);
+      }, 30000);
     }
 
     function appendChat(user, text) {
@@ -350,6 +391,7 @@
             data: msg.data,
             time: eventTime
           });
+          console.log(`[grabación] Evento push: data=${msg.data}, time=${eventTime}`);
         }
         // ←←← FIN DE LA ADICIÓN PARA GRABAR ←←←
 
