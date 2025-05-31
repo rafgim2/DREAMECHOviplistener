@@ -226,36 +226,68 @@
     }
 
     function descargarGrabacion() {
-      const idx = grabacionesSelect.value;
-      if (idx === "") return;
+      // Convertir el valor del <select> a índice numérico
+      const idxStr = grabacionesSelect.value;
+      if (idxStr === "") {
+        statusEl.innerText = "No hay grabación seleccionada.";
+        return;
+      }
+      const idx = parseInt(idxStr, 10);
+      if (isNaN(idx) || idx < 0 || idx >= grabaciones.length) {
+        statusEl.innerText = "Índice de grabación inválido.";
+        return;
+      }
+
       const eventos = grabaciones[idx].eventos;
-      if (!eventos.length) return;
+      if (!eventos || eventos.length === 0) {
+        statusEl.innerText = "No hay eventos en esta grabación.";
+        return;
+      }
+
+      // Crear el track de MIDI
       const track = new MidiWriter.Track();
       track.setTempo(90);
+      // Cambiar al instrumento 1 (acoustic grand piano, por ejemplo)
       track.addEvent(new MidiWriter.ProgramChangeEvent({ instrument: 1 }));
-      const start = eventos[0].time;
+
+      const startTime = eventos[0].time; // timestamp del primer evento
+
+      // Recorrer cada evento y añadir solo las notas ON (0x90 con vel > 0)
       eventos.forEach(ev => {
         const [st, note, vel] = ev.data;
-        const delta = Math.round((ev.time - start) / 10);
-        if ((st & 0xf0) === 0x90 && vel > 0) {
+        const command = st & 0xf0;
+        if (command === 0x90 && vel > 0) {
+          // Calcular delta en milisegundos relativo al primer evento
+          const deltaMs = ev.time - startTime;
+          // Convertir a "ticks" redondeando
+          const deltaTicks = Math.round(deltaMs / 10);
           track.addEvent(new MidiWriter.NoteEvent({
             pitch: [MidiWriter.Utils.midiNumberToNoteName(note)],
-            duration: 'T120',
-            startTick: delta,
+            duration: 'T120',       // Duración fija; ajustar si hace falta
+            startTick: deltaTicks,
             velocity: vel / 127
           }));
         }
       });
+
+      // Generar el archivo .mid
       const writer = new MidiWriter.Writer(track);
       const blob = new Blob([writer.buildFile()], { type: 'audio/midi' });
       const url = URL.createObjectURL(blob);
+
+      // Crear enlace temporal para forzar la descarga
       const a = document.createElement("a");
       a.href = url;
-      a.download = grabaciones[idx].nombre.replace(/\s+/g, "_") + ".mid";
+      // Nombre del archivo: nombre de la grabación con espacios reemplazados
+      const nombreArchivo = (grabaciones[idx].nombre || `grabacion_${idx + 1}`).replace(/\s+/g, "_") + ".mid";
+      a.download = nombreArchivo;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      statusEl.innerText = `Descargando ${grabaciones[idx].nombre}.mid`;
+      // Liberar el objeto URL
+      URL.revokeObjectURL(url);
+
+      statusEl.innerText = `Descargando ${nombreArchivo}`;
     }
 
     function appendChat(user, text) {
