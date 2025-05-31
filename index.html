@@ -115,7 +115,6 @@
     .ripple {
       position: absolute;
       border-radius: 50%;
-      background-color: rgba(0, 150, 255, 0.3);
       transform: scale(0);
       pointer-events: none;
       animation: rippleAnim 0.8s ease-out forwards;
@@ -177,21 +176,42 @@
     }
 
     // ======================
-    // FUNCIONES DE RIPPLE
+    // FUNCIONES DE RIPPLE COLOREADA
     // ======================
-    function createRandomRipple() {
+    /**
+     * Crea una onda (ripple) de color según la intensidad de la nota MIDI.
+     * velocity: valor entre 1 y 127.
+     * - piano (soft)    : velocity <= 63    → color verde
+     * - media (medium)  : 64 <= velocity <= 80  → color azul
+     * - fuerte (loud)   : velocity > 80    → color roja
+     */
+    function createColoredRipple(velocity) {
       const size = 20; // Tamaño inicial en px
       const width = window.innerWidth;
       const height = window.innerHeight;
       const x = Math.random() * width;
       const y = Math.random() * height;
+
+      // Determinar color según velocity
+      let color;
+      if (velocity <= 63) {
+        color = 'rgba(0, 200, 0, 0.3)';    // Verde suave para piano
+      } else if (velocity <= 80) {
+        color = 'rgba(0, 0, 200, 0.3)';    // Azul suave para intensidad media
+      } else {
+        color = 'rgba(200, 0, 0, 0.3)';    // Rojo suave para fuerte
+      }
+
       const circle = document.createElement("div");
       circle.classList.add("ripple");
       circle.style.width = `${size}px`;
       circle.style.height = `${size}px`;
       circle.style.left = `${x - size / 2}px`;
       circle.style.top = `${y - size / 2}px`;
+      circle.style.backgroundColor = color;
       document.body.appendChild(circle);
+
+      // Eliminar el elemento después de que termine la animación (0.8s)
       setTimeout(() => {
         circle.remove();
       }, 800);
@@ -420,9 +440,9 @@
         }
         // ←←← FIN DE GRABAR ←←←
 
-        // ←←← SOLO SI ES UN NOTE-ON (0x90 y velocity > 0), HACER RIPPLE ←←←
+        // ←←← SOLO SI ES UN NOTE-ON (0x90 y velocity > 0), HACER RIPPLE COLOREADA ←←←
         if (command === 0x90 && velocity > 0) {
-          createRandomRipple();
+          createColoredRipple(velocity);
         }
         // ←←← FIN DE RIPPLE ←←←
 
@@ -528,7 +548,7 @@
         baseUrl: "https://tonejs.github.io/audio/salamander/",
         release: 0.4,
         onload: () => {
-          statusEl.innerText =
+          statusEl.textContent =
             `Modo virtual listo. Posición en cola: ${queuePos} → latencia ≃ ${Math.round(queueLatency)} ms`;
         }
       }).toDestination();
