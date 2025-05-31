@@ -55,6 +55,7 @@
       50% { opacity: 0.3; }
       100% { opacity: 1; }
     }
+
     /* Chat */
     #chatLog {
       width: 90%;
@@ -81,7 +82,7 @@
       margin-left: 0.5em;
     }
 
-    /* Clase para los mensajes propios en azul */
+    /* Clase para los mensajes propios (del oyente VIP) en azul */
     .chat-mensaje-propio {
       color: blue;
     }
@@ -139,7 +140,7 @@
     let primeraEstadisticaMostrada = false;
 
     // Nombre de usuario para el chat
-    const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
+    const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente VIP") || "Oyente VIP";
 
     // Carga inicial de grabaciones
     window.onload = () => {
@@ -259,16 +260,15 @@
       statusEl.innerText = `Descargando ${grabaciones[idx].nombre}.mid`;
     }
 
-    // Función appendChat ajustada: si user === username, se añade la clase para ponerlo en azul
+    // Función appendChat modificada para colorear en azul los mensajes propios
     function appendChat(user, text) {
       const msg = document.createElement("div");
       const time = new Date().toLocaleTimeString();
-      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text>`;
-
+      msg.innerHTML = `<small>[${time}]</small> <strong>${user}:</strong> ${text> >}`;
+      // Si el mensaje lo envía el propio oyente VIP, aplicamos la clase .chat-mensaje-propio
       if (user === username) {
         msg.classList.add("chat-mensaje-propio");
       }
-
       chatLog.appendChild(msg);
       chatLog.scrollTop = chatLog.scrollHeight;
     }
