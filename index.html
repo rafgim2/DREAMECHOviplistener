@@ -19,7 +19,6 @@
       font-size: 3em;
       margin-bottom: 0.2em;
     }
-    /* Estilo para el enlace de autor */
     .autor-link {
       display: block;
       margin-bottom: 0.8em;
@@ -70,7 +69,6 @@
       50% { opacity: 0.3; }
       100% { opacity: 1; }
     }
-    /* Parpadeo verde para reproducción */
     button.reproduciendo {
       animation: parpadeoVerde 1s infinite;
       background-color: green;
@@ -81,7 +79,6 @@
       50% { opacity: 0.3; }
       100% { opacity: 1; }
     }
-    /* Chat */
     #chatLog {
       width: 90%;
       max-width: 600px;
@@ -106,12 +103,9 @@
       cursor: pointer;
       margin-left: 0.5em;
     }
-    /* Clase para destacar el mensaje del oyente actual */
     .mensaje-propio {
       color: blue;
     }
-
-    /* ========= RIPPLE EFFECT ========= */
     .ripple {
       position: absolute;
       border-radius: 50%;
@@ -125,12 +119,10 @@
         opacity: 0;
       }
     }
-    /* ================================== */
   </style>
 </head>
 <body>
   <h1>DreamEcho - Oyente VIP</h1>
-  <!-- Enlace de autor debajo del título -->
   <a class="autor-link" href="https://www.youtube.com/@rafgim" target="_blank" rel="noopener noreferrer">
     © By Rafael Gimeno
   </a>
@@ -164,47 +156,37 @@
 
   <script>
     // ======================
-    // FUNCIONES AUXILIARES
+    // AUXILIARES
     // ======================
     function midiNumberToNoteName(number) {
       const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
       const octave = Math.floor(number / 12) - 1;
-      const noteIndex = number % 12;
-      return names[noteIndex] + octave;
+      return names[number % 12] + octave;
     }
 
     function createColoredRipple(velocity) {
       const size = 20;
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const x = Math.random() * width;
-      const y = Math.random() * height;
-
+      const x = Math.random() * window.innerWidth;
+      const y = Math.random() * window.innerHeight;
       let color;
-      if (velocity <= 63) {
-        color = 'rgba(0, 200, 0, 0.3)';
-      } else if (velocity <= 80) {
-        color = 'rgba(0, 0, 200, 0.3)';
-      } else {
-        color = 'rgba(200, 0, 0, 0.3)';
-      }
+      if (velocity <= 63)      color = 'rgba(0,200,0,0.3)';
+      else if (velocity <= 80) color = 'rgba(0,0,200,0.3)';
+      else                     color = 'rgba(200,0,0,0.3)';
 
       const circle = document.createElement("div");
       circle.classList.add("ripple");
       circle.style.width = `${size}px`;
       circle.style.height = `${size}px`;
-      circle.style.left = `${x - size / 2}px`;
-      circle.style.top = `${y - size / 2}px`;
+      circle.style.left = `${x - size/2}px`;
+      circle.style.top  = `${y - size/2}px`;
       circle.style.backgroundColor = color;
       document.body.appendChild(circle);
 
-      setTimeout(() => {
-        circle.remove();
-      }, 800);
+      setTimeout(() => circle.remove(), 800);
     }
 
     // ======================
-    // ACCESO AL DOM
+    // DOM
     // ======================
     const statusEl            = document.getElementById("status");
     const oyentesEl           = document.getElementById("recuentoOyentes");
@@ -217,11 +199,12 @@
     const sendChatBtn         = document.getElementById("sendChatBtn");
 
     // ======================
-    // VARIABLES DE ESTADO
+    // ESTADO
     // ======================
     let output = null, modo = null, synth = null, pedal = false;
-    let startPlaybackTime = null;   // Momento local en que reproduzco la primera nota
-    let firstEventTime = null;      // Valor de msg.time de la primera nota recibida
+    let firstEventTime = null;       // msg.time de la primera nota
+    let startPlaybackTime = null;    // performance.now() de la primera nota (para MIDI físico)
+    let audioStartTime = null;       // Tone.now() de la primera nota (para Virtual)
     const notasActivas    = new Set();
     const notasSostenidas = new Set();
     let grabando = false;
@@ -231,12 +214,11 @@
     let queuePos = 0, queueLatency = 0;
 
     const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
-
-    // ======================
-    // WEBSOCKET
-    // ======================
     const ws = new WebSocket("wss://dreamecho.onrender.com");
 
+    // ======================
+    // CARGA INICIAL DE GRABACIONES
+    // ======================
     window.onload = () => {
       const guardadas = localStorage.getItem("dreamEchoGrabaciones");
       if (guardadas) {
@@ -260,13 +242,14 @@
     }
 
     // ======================
-    // FUNCIONES DE GRABACIÓN
+    // GRABACIÓN
     // ======================
     function iniciarGrabacion() {
       grabando = true;
       grabacionActual = [];
-      startPlaybackTime = null;
       firstEventTime = null;
+      startPlaybackTime = null;
+      audioStartTime = null;
       statusEl.innerText = "Grabando… espera las notas entrantes.";
       btnGrabar.classList.add("grabando");
       console.log("[grabación] Iniciada. grabacionActual vacía.");
@@ -354,7 +337,7 @@
     }
 
     // ======================
-    // CHAT Y MIDI ENTRANTES
+    // CHAT
     // ======================
     function appendChat(user, text) {
       const msg = document.createElement("div");
@@ -393,7 +376,7 @@
           queuePos = msg.clients;
           queueLatency = 50 + 5 * Math.sqrt(queuePos);
           statusEl.textContent =
-            `Posición en cola: ${queuePos} → latencia = ${Math.round(queueLatency)} ms`;
+            `Posición en cola: ${queuePos} → latencia ≃ ${Math.round(queueLatency)} ms`;
           primeraEstadisticaMostrada = true;
         }
         return;
@@ -409,71 +392,72 @@
         const command = st & 0xf0;
         const eventTime = msg.time;
 
-        // ─── PRIMERA NOTA: guardo referencia ───
+        // ─── Primera nota: establecemos referencias ───
         if (firstEventTime === null) {
-          firstEventTime = eventTime;             // msg.time de la primera nota recibida
-          startPlaybackTime = performance.now();   // momento “0” en el receptor
+          firstEventTime = eventTime;
+          if (modo === "virtual") {
+            audioStartTime = Tone.now();
+          } else {
+            startPlaybackTime = performance.now();
+          }
         }
 
-        // ─── Calculo tiempo relativo al primero ───
-        const relative = eventTime - firstEventTime;
+        // ─── Calculamos tiempo relativo al primer evento ───
+        const relative = eventTime - firstEventTime; // en ms
         const extra = modo === "virtual" ? queueLatency : 0;
-        const scheduledTime = startPlaybackTime + relative;
-        const delay = Math.max(0, scheduledTime - performance.now() + extra);
 
-        // ─── Si estoy grabando, guardo en grabacionActual ───
-        if (grabando) {
-          grabacionActual.push({
-            data: msg.data,
-            time: relative // grabo tiempo relativo para volver a reproducir fielmente
-          });
-          console.log(`[grabación] Evento push: data=${msg.data}, time=${relative}`);
-        }
-
-        // ─── Efecto visual si es note-on ───
-        if (command === 0x90 && velocity > 0) {
-          createColoredRipple(velocity);
-        }
-
-        // ─── MODO MIDI FÍSICO ───
         if (modo === "midi" && output) {
-          return setTimeout(() =>
-            output.send(new Uint8Array(msg.data)), delay
-          );
+          // ─── MODO MIDI FÍSICO: enviamos con timestamp preciso ───
+          const sendTime = (startPlaybackTime + relative + extra);
+          // timestamp = valor en ms de performance.now() cuando debe sonar
+          output.send(new Uint8Array(msg.data), sendTime);
         }
 
-        // ─── MODO VIRTUAL (Tone.js) ───
         if (modo === "virtual" && synth) {
+          // ─── MODO VIRTUAL: programamos en AudioContext de Tone.js ───
           const freq = Tone.Frequency(note, "midi").toFrequency();
+          const timeSec = audioStartTime + (relative + extra) / 1000;
 
           if (command === 0x90 && velocity > 0) {
-            setTimeout(() => {
-              synth.triggerAttack(freq, undefined, velocity / 127);
-              notasActivas.add(freq);
-              notasSostenidas.delete(freq);
-            }, delay);
+            synth.triggerAttack(freq, timeSec, velocity / 127);
+            notasActivas.add(freq);
+            notasSostenidas.delete(freq);
+            createColoredRipple(velocity);
           } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
-            setTimeout(() => {
-              if (pedal) {
-                notasActivas.delete(freq);
-                notasSostenidas.add(freq);
-              } else {
-                synth.triggerRelease(freq, "+0.2");
-                notasActivas.delete(freq);
-                notasSostenidas.delete(freq);
-              }
-            }, delay);
+            // Si sostenido, guardamos; si no, liberamos inmediatamente
+            if (pedal) {
+              notasActivas.delete(freq);
+              notasSostenidas.add(freq);
+            } else {
+              synth.triggerRelease(freq, timeSec);
+              notasActivas.delete(freq);
+              notasSostenidas.delete(freq);
+            }
           } else if (st === 176 && note === 64) {
-            pedal = velocity >= 64;
-            if (!pedal) {
+            // Control Change 64 = sustain pedal
+            const isDown = velocity >= 64;
+            if (isDown) {
+              pedal = true;
+            } else {
+              pedal = false;
+              // Liberamos todas las notas sostenidas que no estén aún tocando
               notasSostenidas.forEach(f => {
                 if (!notasActivas.has(f)) {
-                  synth.triggerRelease(f, "+0.2");
+                  synth.triggerRelease(f, timeSec);
                   notasSostenidas.delete(f);
                 }
               });
             }
           }
+        }
+
+        // ─── Guardamos en grabación local con tiempo relativo ───
+        if (grabando) {
+          grabacionActual.push({
+            data: msg.data,
+            time: relative
+          });
+          console.log(`[grabación] Evento push: data=${msg.data}, time=${relative}`);
         }
       }
     };
