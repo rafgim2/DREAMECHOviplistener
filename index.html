@@ -156,7 +156,7 @@
 
   <script>
     // ======================
-    // AUXILIARES
+    // FUNCIONES AUXILIARES
     // ======================
     function midiNumberToNoteName(number) {
       const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
@@ -186,7 +186,7 @@
     }
 
     // ======================
-    // DOM
+    // ACCESO AL DOM
     // ======================
     const statusEl            = document.getElementById("status");
     const oyentesEl           = document.getElementById("recuentoOyentes");
@@ -199,10 +199,10 @@
     const sendChatBtn         = document.getElementById("sendChatBtn");
 
     // ======================
-    // ESTADO
+    // VARIABLES DE ESTADO
     // ======================
     let output = null, modo = null, synth = null, pedal = false;
-    let firstEventTime = null;       // msg.time de la primera nota
+    let firstEventTime = null;       // msg.time de la primera nota recibida
     let startPlaybackTime = null;    // performance.now() de la primera nota (para MIDI físico)
     let audioStartTime = null;       // Tone.now() de la primera nota (para Virtual)
     const notasActivas    = new Set();
@@ -242,7 +242,7 @@
     }
 
     // ======================
-    // GRABACIÓN
+    // FUNCIONES DE GRABACIÓN
     // ======================
     function iniciarGrabacion() {
       grabando = true;
@@ -337,7 +337,7 @@
     }
 
     // ======================
-    // CHAT
+    // CHAT Y MIDI ENTRANTES
     // ======================
     function appendChat(user, text) {
       const msg = document.createElement("div");
@@ -403,18 +403,19 @@
         }
 
         // ─── Calculamos tiempo relativo al primer evento ───
-        const relative = eventTime - firstEventTime; // en ms
-        const extra = modo === "virtual" ? queueLatency : 0;
+        const relative = eventTime - firstEventTime;
+        const extra = queueLatency; // Mantener latencia según posición en cola
 
+        // ─── MODO MIDI FÍSICO ───
         if (modo === "midi" && output) {
-          // ─── MODO MIDI FÍSICO: enviamos con timestamp preciso ───
-          const sendTime = (startPlaybackTime + relative + extra);
-          // timestamp = valor en ms de performance.now() cuando debe sonar
-          output.send(new Uint8Array(msg.data), sendTime);
+          const delay = Math.max(0, startPlaybackTime + relative + extra - performance.now());
+          setTimeout(() => {
+            output.send(new Uint8Array(msg.data));
+          }, delay);
         }
 
+        // ─── MODO VIRTUAL (Tone.js) ───
         if (modo === "virtual" && synth) {
-          // ─── MODO VIRTUAL: programamos en AudioContext de Tone.js ───
           const freq = Tone.Frequency(note, "midi").toFrequency();
           const timeSec = audioStartTime + (relative + extra) / 1000;
 
@@ -424,23 +425,16 @@
             notasSostenidas.delete(freq);
             createColoredRipple(velocity);
           } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
-            // Si sostenido, guardamos; si no, liberamos inmediatamente
-            if (pedal) {
-              notasActivas.delete(freq);
-              notasSostenidas.add(freq);
-            } else {
-              synth.triggerRelease(freq, timeSec);
-              notasActivas.delete(freq);
-              notasSostenidas.delete(freq);
-            }
+            synth.triggerRelease(freq, timeSec);
+            notasActivas.delete(freq);
+            notasSostenidas.delete(freq);
           } else if (st === 176 && note === 64) {
-            // Control Change 64 = sustain pedal
+            // Sustain pedal (CC64)
             const isDown = velocity >= 64;
             if (isDown) {
               pedal = true;
             } else {
               pedal = false;
-              // Liberamos todas las notas sostenidas que no estén aún tocando
               notasSostenidas.forEach(f => {
                 if (!notasActivas.has(f)) {
                   synth.triggerRelease(f, timeSec);
@@ -451,7 +445,7 @@
           }
         }
 
-        // ─── Guardamos en grabación local con tiempo relativo ───
+        // ─── Si estamos grabando, guardamos con tiempo relativo ───
         if (grabando) {
           grabacionActual.push({
             data: msg.data,
@@ -510,7 +504,7 @@
       await Tone.start();
       synth = new Tone.Sampler({
         urls: {
-          A0:  "A0.mp3", C1:  "C1.mp3", "D#1":"Ds1.mp3","F#1":"Fs1.mp3",
+          A0:  "A0.mp3", C1:  "C1.mp3","D#1":"Ds1.mp3","F#1":"Fs1.mp3",
           A1:  "A1.mp3", C2:  "C2.mp3","D#2":"Ds2.mp3","F#2":"Fs2.mp3",
           A2:  "A2.mp3", C3:  "C3.mp3","D#3":"Ds3.mp3","F#3":"Fs3.mp3",
           A3:  "A3.mp3", C4:  "C4.mp3","D#4":"Ds4.mp3","F#4":"Fs4.mp3",
