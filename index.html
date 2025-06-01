@@ -166,7 +166,6 @@
     // ======================
     // FUNCIONES AUXILIARES
     // ======================
-
     // Convierte un número MIDI (0–127) en nombre de nota (p.ej. 60 → "C4").
     function midiNumberToNoteName(number) {
       const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
@@ -220,27 +219,28 @@
     // ======================
     // ACCESO AL DOM
     // ======================
-    const statusEl        = document.getElementById("status");
-    const oyentesEl       = document.getElementById("recuentoOyentes");
+    const statusEl            = document.getElementById("status");
+    const oyentesEl           = document.getElementById("recuentoOyentes");
     const midiSelectContainer = document.getElementById("midiSelectContainer");
     const grabacionesSelect   = document.getElementById("grabacionesSelect");
-    const btnGrabar       = document.getElementById("btnGrabar");
-    const btnReproducir   = document.getElementById("btnReproducir");
-    const chatLog         = document.getElementById("chatLog");
-    const chatInput       = document.getElementById("chatInput");
-    const sendChatBtn     = document.getElementById("sendChatBtn");
+    const btnGrabar           = document.getElementById("btnGrabar");
+    const btnReproducir       = document.getElementById("btnReproducir");
+    const chatLog             = document.getElementById("chatLog");
+    const chatInput           = document.getElementById("chatInput");
+    const sendChatBtn         = document.getElementById("sendChatBtn");
 
     // ======================
     // VARIABLES DE ESTADO
     // ======================
     let output = null, modo = null, synth = null, pedal = false;
-    let baseTime = null, queuePos = 0, queueLatency = 100;
+    let startPlaybackTime = null; // 🔧 CAMBIO: en lugar de baseTime
     const notasActivas    = new Set();
     const notasSostenidas = new Set();
     let grabando = false;
     let grabacionActual = [];
     let grabaciones = [];
     let primeraEstadisticaMostrada = false;
+    let queuePos = 0, queueLatency = 0; // variables para calcular latencia
 
     // Nombre de usuario para el chat
     const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
@@ -281,8 +281,8 @@
     function iniciarGrabacion() {
       grabando = true;
       grabacionActual = [];
-      baseTime = null;
-      statusEl.innerText = "Grabando… toca algo desde el piano.";
+      startPlaybackTime = null;
+      statusEl.innerText = "Grabando… espera las notas entrantes.";
       btnGrabar.classList.add("grabando");
       console.log("[grabación] Iniciada. grabacionActual vacía.");
     }
@@ -333,7 +333,7 @@
         const delay = Math.max(0, ev.time - startTime);
         setTimeout(() => {
           ws.dispatchEvent(new MessageEvent("message", {
-            data: JSON.stringify({ type: "midi", data: ev.data, time: 0 })
+            data: JSON.stringify({ type: "midi", data: ev.data, time: ev.time })
           }));
         }, delay);
       });
@@ -428,9 +428,18 @@
         const [st, note, velocity] = msg.data;
         const command = st & 0xf0;
         const eventTime = msg.time;
-        if (!baseTime) baseTime = performance.now() - eventTime;
 
-        // ←←← GRABAR CADA EVENTO MIDI QUE LLEGA ←←←
+        // 🔧 CAMBIO: registramos el momento de inicio de reproducción
+        if (startPlaybackTime === null) {
+          startPlaybackTime = performance.now();
+        }
+
+        // ⏱️ Cálculo preciso del retraso respecto al tiempo relativo del emisor
+        const extra = modo === "virtual" ? queueLatency : 0;
+        const scheduledTime = startPlaybackTime + eventTime;
+        const delay = Math.max(0, scheduledTime - performance.now() + extra);
+
+        // 🎧 Grabación local (opcional)
         if (grabando) {
           grabacionActual.push({
             data: msg.data,
@@ -438,42 +447,39 @@
           });
           console.log(`[grabación] Evento push: data=${msg.data}, time=${eventTime}`);
         }
-        // ←←← FIN DE GRABAR ←←←
 
-        // ←←← SOLO SI ES UN NOTE-ON (0x90 y velocity > 0), HACER RIPPLE COLOREADA ←←←
+        // 💧 Efecto visual para notas
         if (command === 0x90 && velocity > 0) {
           createColoredRipple(velocity);
         }
-        // ←←← FIN DE RIPPLE ←←←
 
-        const extra = modo === "virtual" ? queueLatency : 0;
-        const delay = Math.max(
-          0,
-          eventTime + baseTime - performance.now() + extra
-        );
-        const toneTime = "+" + (delay / 1000);
-
+        // 🎹 MODO MIDI físico
         if (modo === "midi" && output) {
           return setTimeout(() =>
             output.send(new Uint8Array(msg.data)), delay
           );
         }
 
+        // 🎧 MODO VIRTUAL (Tone.js)
         if (modo === "virtual" && synth) {
           const freq = Tone.Frequency(note, "midi").toFrequency();
           if (command === 0x90 && velocity > 0) {
-            synth.triggerAttack(freq, undefined, velocity / 127);
-            notasActivas.add(freq);
-            notasSostenidas.delete(freq);
-          } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
-            if (pedal) {
-              notasActivas.delete(freq);
-              notasSostenidas.add(freq);
-            } else {
-              synth.triggerRelease(freq, "+0.2");
-              notasActivas.delete(freq);
+            setTimeout(() => {
+              synth.triggerAttack(freq, undefined, velocity / 127);
+              notasActivas.add(freq);
               notasSostenidas.delete(freq);
-            }
+            }, delay);
+          } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
+            setTimeout(() => {
+              if (pedal) {
+                notasActivas.delete(freq);
+                notasSostenidas.add(freq);
+              } else {
+                synth.triggerRelease(freq, "+0.2");
+                notasActivas.delete(freq);
+                notasSostenidas.delete(freq);
+              }
+            }, delay);
           } else if (st === 176 && note === 64) {
             pedal = velocity >= 64;
             if (!pedal) {
