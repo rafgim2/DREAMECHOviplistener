@@ -166,7 +166,6 @@
     // ======================
     // FUNCIONES AUXILIARES
     // ======================
-    // Convierte un número MIDI (0–127) en nombre de nota (p.ej. 60 → "C4").
     function midiNumberToNoteName(number) {
       const names = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
       const octave = Math.floor(number / 12) - 1;
@@ -174,31 +173,20 @@
       return names[noteIndex] + octave;
     }
 
-    // ======================
-    // FUNCIONES DE RIPPLE COLOREADA
-    // ======================
-    /**
-     * Crea una onda (ripple) de color según la intensidad de la nota MIDI.
-     * velocity: valor entre 1 y 127.
-     * - piano (soft)    : velocity <= 63    → color verde
-     * - media (medium)  : 64 <= velocity <= 80  → color azul
-     * - fuerte (loud)   : velocity > 80    → color roja
-     */
     function createColoredRipple(velocity) {
-      const size = 20; // Tamaño inicial en px
+      const size = 20;
       const width = window.innerWidth;
       const height = window.innerHeight;
       const x = Math.random() * width;
       const y = Math.random() * height;
 
-      // Determinar color según velocity
       let color;
       if (velocity <= 63) {
-        color = 'rgba(0, 200, 0, 0.3)';    // Verde suave para piano
+        color = 'rgba(0, 200, 0, 0.3)';
       } else if (velocity <= 80) {
-        color = 'rgba(0, 0, 200, 0.3)';    // Azul suave para intensidad media
+        color = 'rgba(0, 0, 200, 0.3)';
       } else {
-        color = 'rgba(200, 0, 0, 0.3)';    // Rojo suave para fuerte
+        color = 'rgba(200, 0, 0, 0.3)';
       }
 
       const circle = document.createElement("div");
@@ -210,7 +198,6 @@
       circle.style.backgroundColor = color;
       document.body.appendChild(circle);
 
-      // Eliminar el elemento después de que termine la animación (0.8s)
       setTimeout(() => {
         circle.remove();
       }, 800);
@@ -233,16 +220,16 @@
     // VARIABLES DE ESTADO
     // ======================
     let output = null, modo = null, synth = null, pedal = false;
-    let startPlaybackTime = null; // 🔧 CAMBIO: en lugar de baseTime
+    let startPlaybackTime = null;   // Momento local en que reproduzco la primera nota
+    let firstEventTime = null;      // Valor de msg.time de la primera nota recibida
     const notasActivas    = new Set();
     const notasSostenidas = new Set();
     let grabando = false;
     let grabacionActual = [];
     let grabaciones = [];
     let primeraEstadisticaMostrada = false;
-    let queuePos = 0, queueLatency = 0; // variables para calcular latencia
+    let queuePos = 0, queueLatency = 0;
 
-    // Nombre de usuario para el chat
     const username = prompt("¿Cómo quieres que te vean en el chat?", "Oyente") || "Oyente";
 
     // ======================
@@ -250,9 +237,6 @@
     // ======================
     const ws = new WebSocket("wss://dreamecho.onrender.com");
 
-    // ======================
-    // CARGA INICIAL DE GRABACIONES
-    // ======================
     window.onload = () => {
       const guardadas = localStorage.getItem("dreamEchoGrabaciones");
       if (guardadas) {
@@ -282,6 +266,7 @@
       grabando = true;
       grabacionActual = [];
       startPlaybackTime = null;
+      firstEventTime = null;
       statusEl.innerText = "Grabando… espera las notas entrantes.";
       btnGrabar.classList.add("grabando");
       console.log("[grabación] Iniciada. grabacionActual vacía.");
@@ -315,20 +300,15 @@
       const eventos = grabaciones[idx].eventos;
       if (!eventos.length) return;
 
-      // Calcular duración total: tiempo último evento - tiempo primero
       const startTime = eventos[0].time;
       const lastTime = eventos[eventos.length - 1].time;
       const totalMs = lastTime - startTime;
 
-      // Añadir clase para parpadeo verde
       btnReproducir.classList.add("reproduciendo");
-
-      // Programar quitar clase tras la reproducción (se añade pequeño buffer de 200ms)
       setTimeout(() => {
         btnReproducir.classList.remove("reproduciendo");
       }, totalMs + 200);
 
-      // Enviar eventos al WebSocket simulando latencia/cola
       eventos.forEach(ev => {
         const delay = Math.max(0, ev.time - startTime);
         setTimeout(() => {
@@ -429,40 +409,43 @@
         const command = st & 0xf0;
         const eventTime = msg.time;
 
-        // 🔧 CAMBIO: registramos el momento de inicio de reproducción
-        if (startPlaybackTime === null) {
-          startPlaybackTime = performance.now();
+        // ─── PRIMERA NOTA: guardo referencia ───
+        if (firstEventTime === null) {
+          firstEventTime = eventTime;             // msg.time de la primera nota recibida
+          startPlaybackTime = performance.now();   // momento “0” en el receptor
         }
 
-        // ⏱️ Cálculo preciso del retraso respecto al tiempo relativo del emisor
+        // ─── Calculo tiempo relativo al primero ───
+        const relative = eventTime - firstEventTime;
         const extra = modo === "virtual" ? queueLatency : 0;
-        const scheduledTime = startPlaybackTime + eventTime;
+        const scheduledTime = startPlaybackTime + relative;
         const delay = Math.max(0, scheduledTime - performance.now() + extra);
 
-        // 🎧 Grabación local (opcional)
+        // ─── Si estoy grabando, guardo en grabacionActual ───
         if (grabando) {
           grabacionActual.push({
             data: msg.data,
-            time: eventTime
+            time: relative // grabo tiempo relativo para volver a reproducir fielmente
           });
-          console.log(`[grabación] Evento push: data=${msg.data}, time=${eventTime}`);
+          console.log(`[grabación] Evento push: data=${msg.data}, time=${relative}`);
         }
 
-        // 💧 Efecto visual para notas
+        // ─── Efecto visual si es note-on ───
         if (command === 0x90 && velocity > 0) {
           createColoredRipple(velocity);
         }
 
-        // 🎹 MODO MIDI físico
+        // ─── MODO MIDI FÍSICO ───
         if (modo === "midi" && output) {
           return setTimeout(() =>
             output.send(new Uint8Array(msg.data)), delay
           );
         }
 
-        // 🎧 MODO VIRTUAL (Tone.js)
+        // ─── MODO VIRTUAL (Tone.js) ───
         if (modo === "virtual" && synth) {
           const freq = Tone.Frequency(note, "midi").toFrequency();
+
           if (command === 0x90 && velocity > 0) {
             setTimeout(() => {
               synth.triggerAttack(freq, undefined, velocity / 127);
