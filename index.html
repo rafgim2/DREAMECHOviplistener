@@ -205,6 +205,8 @@
     let firstEventTime = null;       // msg.time de la primera nota recibida
     let startPlaybackTime = null;    // performance.now() de la primera nota (para MIDI físico)
     let audioStartTime = null;       // Tone.now() de la primera nota (para Virtual)
+    let samplerReady = false;        // Indicador de que Tone.Sampler está cargado
+    const pendingMsgs = [];          // Para guardar mensajes que llegan antes de que Sampler esté listo
     const notasActivas    = new Set();
     const notasSostenidas = new Set();
     let grabando = false;
@@ -388,6 +390,12 @@
       }
 
       if (msg.type === "midi") {
+        // Si estamos en modo virtual y el sampler aún no terminó de cargar, guardamos
+        if (modo === "virtual" && !samplerReady) {
+          pendingMsgs.push(msg);
+          return;
+        }
+
         const [st, note, velocity] = msg.data;
         const command = st & 0xf0;
         const eventTime = msg.time;
@@ -396,65 +404,80 @@
         if (firstEventTime === null) {
           firstEventTime = eventTime;
           if (modo === "virtual") {
-            audioStartTime = Tone.now();
-          } else {
-            startPlaybackTime = performance.now();
-          }
-        }
-
-        // ─── Calculamos tiempo relativo al primer evento ───
-        const relative = eventTime - firstEventTime;
-        const extra = queueLatency; // Mantener latencia según posición en cola
-
-        // ─── MODO MIDI FÍSICO ───
-        if (modo === "midi" && output) {
-          const delay = Math.max(0, startPlaybackTime + relative + extra - performance.now());
-          setTimeout(() => {
-            output.send(new Uint8Array(msg.data));
-          }, delay);
-        }
-
-        // ─── MODO VIRTUAL (Tone.js) ───
-        if (modo === "virtual" && synth) {
-          const freq = Tone.Frequency(note, "midi").toFrequency();
-          const timeSec = audioStartTime + (relative + extra) / 1000;
-
-          if (command === 0x90 && velocity > 0) {
-            synth.triggerAttack(freq, timeSec, velocity / 127);
-            notasActivas.add(freq);
-            notasSostenidas.delete(freq);
-            createColoredRipple(velocity);
-          } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
-            synth.triggerRelease(freq, timeSec);
-            notasActivas.delete(freq);
-            notasSostenidas.delete(freq);
-          } else if (st === 176 && note === 64) {
-            // Sustain pedal (CC64)
-            const isDown = velocity >= 64;
-            if (isDown) {
-              pedal = true;
-            } else {
-              pedal = false;
-              notasSostenidas.forEach(f => {
-                if (!notasActivas.has(f)) {
-                  synth.triggerRelease(f, timeSec);
-                  notasSostenidas.delete(f);
-                }
-              });
+            audioStartTime = Tone.now() + queueLatency / 1000;
+            // Procesamos de inmediato cualquier mensaje pendiente
+            while (pendingMsgs.length) {
+              scheduleMidi(pendingMsgs.shift());
             }
+          } else {
+            startPlaybackTime = performance.now() + queueLatency;
           }
         }
 
-        // ─── Si estamos grabando, guardamos con tiempo relativo ───
-        if (grabando) {
-          grabacionActual.push({
-            data: msg.data,
-            time: relative
-          });
-          console.log(`[grabación] Evento push: data=${msg.data}, time=${relative}`);
-        }
+        // ─── Programamos este mensaje ───
+        scheduleMidi(msg);
       }
     };
+
+    // ======================
+    // Función para programar un mensaje MIDI (físico o virtual)
+    // ======================
+    function scheduleMidi(msg) {
+      const [st, note, velocity] = msg.data;
+      const command = st & 0xf0;
+      const eventTime = msg.time;
+
+      const relative = eventTime - firstEventTime;
+      const extra = queueLatency;
+
+      // ─── MODO MIDI FÍSICO ───
+      if (modo === "midi" && output) {
+        const delay = Math.max(0, startPlaybackTime + relative - performance.now());
+        setTimeout(() => {
+          output.send(new Uint8Array(msg.data));
+        }, delay);
+      }
+
+      // ─── MODO VIRTUAL (Tone.js) ───
+      if (modo === "virtual" && synth) {
+        const freq = Tone.Frequency(note, "midi").toFrequency();
+        const timeSec = audioStartTime + relative / 1000;
+
+        if (command === 0x90 && velocity > 0) {
+          synth.triggerAttack(freq, timeSec, velocity / 127);
+          notasActivas.add(freq);
+          notasSostenidas.delete(freq);
+          createColoredRipple(velocity);
+        } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
+          synth.triggerRelease(freq, timeSec);
+          notasActivas.delete(freq);
+          notasSostenidas.delete(freq);
+        } else if (st === 176 && note === 64) {
+          // Sustain pedal (CC64)
+          const isDown = velocity >= 64;
+          if (isDown) {
+            pedal = true;
+          } else {
+            pedal = false;
+            notasSostenidas.forEach(f => {
+              if (!notasActivas.has(f)) {
+                synth.triggerRelease(f, timeSec);
+                notasSostenidas.delete(f);
+              }
+            });
+          }
+        }
+      }
+
+      // ─── Si estamos grabando, guardamos con tiempo relativo ───
+      if (grabando) {
+        grabacionActual.push({
+          data: msg.data,
+          time: relative
+        });
+        console.log(`[grabación] Evento push: data=${msg.data}, time=${relative}`);
+      }
+    }
 
     // ======================
     // MODO MIDI Y VIRTUAL
@@ -515,8 +538,10 @@
         baseUrl: "https://tonejs.github.io/audio/salamander/",
         release: 0.4,
         onload: () => {
+          samplerReady = true;
           statusEl.textContent =
             `Modo virtual listo. Posición en cola: ${queuePos} → latencia ≃ ${Math.round(queueLatency)} ms`;
+          // Si ya han llegado mensajes antes, se procesarán en el onmessage
         }
       }).toDestination();
     }
