@@ -434,14 +434,17 @@
         const timeSec = audioStartTime + relative / 1000;
 
         if (command === 0x90 && velocity > 0) {
-          synth.triggerAttack(freq, timeSec, velocity / 127);
+          // Normalizamos velocity a [0..1]
+          const velNorm = velocity / 127;
+          // Aplicamos curva cuadrática para intensidades bajas
+          const velScaled = Math.pow(velNorm, 2);
+          synth.triggerAttack(freq, timeSec, velScaled);
           notasActivas.add(freq);
           notasSostenidas.delete(freq);
           createColoredRipple(velocity);
         } else if (command === 0x80 || (command === 0x90 && velocity === 0)) {
           // Nota off
           if (pedal) {
-            // Si pedal está abajo, guardamos frecuencia para liberar después
             notasActivas.delete(freq);
             notasSostenidas.add(freq);
           } else {
@@ -456,7 +459,6 @@
             pedal = true;
           } else {
             pedal = false;
-            // Liberamos todas las notas sostenidas que ya no estén tocando
             notasSostenidas.forEach(f => {
               if (!notasActivas.has(f)) {
                 synth.triggerRelease(f, timeSec);
@@ -483,7 +485,7 @@
     function modoMIDI() {
       modo = "midi";
       statusEl.innerText = "Buscando dispositivos MIDI de salida…";
-      // Cada vez que elegimos modo, reiniciamos base de tiempos
+      // Reiniciamos base de tiempos y estado de pedal/sets
       firstEventTime = null;
       startPlaybackTime = null;
       pedal = false;
@@ -532,7 +534,7 @@
     async function modoVirtual() {
       modo = "virtual";
       statusEl.innerText = "Cargando piano virtual…";
-      // Reiniciamos base de tiempos
+      // Reiniciamos base de tiempos y estado de pedal/sets
       firstEventTime = null;
       audioStartTime = null;
       pedal = false;
